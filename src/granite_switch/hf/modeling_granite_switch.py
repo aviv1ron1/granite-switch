@@ -143,6 +143,11 @@ class GraniteSwitchPreTrainedModel(GraniteMoeHybridPreTrainedModel):
     config_class = GraniteSwitchConfig
     base_model_prefix = "model"
     _no_split_modules = ["GraniteSwitchAttentionDecoderLayer"]
+    _keys_to_ignore_on_load_unexpected = [
+        r"model\.adapter_token_ids",
+        r"model\.token_to_group_mask",
+        r"model\.adapter_hiding_matrix",
+    ]
     _is_stateful = True
 
 
