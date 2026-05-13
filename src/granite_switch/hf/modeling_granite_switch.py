@@ -322,6 +322,16 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
         # Compute adapter_indices using switch (BEFORE RoPE for position correction)
         hidden_count = None
         if self.switch is not None:
+            # Non-persistent buffers aren't moved by accelerate's device_map;
+            # ensure they're on the same device as the input.
+            device = input_ids.device if input_ids is not None else inputs_embeds.device
+            if self.adapter_token_ids.device != device:
+                self.adapter_token_ids = self.adapter_token_ids.to(device)
+                if self.token_to_group_mask is not None:
+                    self.token_to_group_mask = self.token_to_group_mask.to(device)
+                if self.adapter_hiding_matrix is not None:
+                    self.adapter_hiding_matrix = self.adapter_hiding_matrix.to(device)
+
             adapter_indices = self.switch(
                 input_ids=input_ids,
                 adapter_token_ids=self.adapter_token_ids,
