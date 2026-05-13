@@ -167,8 +167,9 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
 
             # --- Control token buffers ---
             # All values come from config (serialized in config.json).
-            # Stored as buffers (not nn.Parameter) so they follow .to(device)
-            # without appearing as trainable parameters.
+            # Stored as non-persistent buffers so they follow .to(device)
+            # without appearing as trainable parameters or in state_dict()
+            # (avoids accelerate device_map placement errors on multi-GPU).
             #
             # adapter_token_ids: Hidden-flavor control tokens, one per adapter.
             #   The switch layer detects these in the input sequence to determine
@@ -180,12 +181,14 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
                 self.register_buffer(
                     "adapter_token_ids",
                     torch.tensor(token_ids, dtype=torch.long),
+                    persistent=False,
                 )
             else:
                 # Build script hasn't populated yet — zeros placeholder
                 self.register_buffer(
                     "adapter_token_ids",
                     torch.zeros(config.num_adapters, dtype=torch.long),
+                    persistent=False,
                 )
 
             # --- Hiding group buffers ---
@@ -208,7 +211,7 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
                 for g, tids in group_token_ids.items():
                     for tid in tids:
                         token_to_group_mask[tid, g] = True
-                self.register_buffer("token_to_group_mask", token_to_group_mask)
+                self.register_buffer("token_to_group_mask", token_to_group_mask, persistent=False)
 
                 # adapter_hiding_matrix: [num_adapter_slots, num_groups] boolean.
                 # Index 0 = base, 1+ = adapters. True if adapter hides group g.
@@ -216,6 +219,7 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
                 self.register_buffer(
                     "adapter_hiding_matrix",
                     torch.tensor(policy_matrix, dtype=torch.bool),
+                    persistent=False,
                 )
             else:
                 self.token_to_group_mask = None
