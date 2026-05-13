@@ -266,6 +266,34 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
         # Initialize weights
         self.post_init()
 
+    def _rebuild_hiding_buffers(self, device: torch.device):
+        """Rebuild hiding group buffers from config on the given device.
+
+        Called on first forward when accelerate's init_empty_weights() has
+        zeroed out the non-persistent buffers during from_pretrained.
+        """
+        config = self.config
+        num_groups = config.num_hiding_groups
+        if num_groups > 0:
+            group_token_ids = config.get_hiding_group_token_ids()
+            all_known_ids = [tid for tids in group_token_ids.values() for tid in tids]
+            if config.adapter_token_ids:
+                all_known_ids.extend(config.adapter_token_ids)
+            max_tid = max(all_known_ids) if all_known_ids else -1
+            table_size = max(config.vocab_size, max_tid + 1)
+            token_to_group_mask = torch.zeros(
+                table_size, num_groups, dtype=torch.bool, device=device
+            )
+            for g, tids in group_token_ids.items():
+                for tid in tids:
+                    token_to_group_mask[tid, g] = True
+            self.token_to_group_mask = token_to_group_mask
+
+            policy_matrix = config.get_adapter_hiding_policy_matrix()
+            self.adapter_hiding_matrix = torch.tensor(
+                policy_matrix, dtype=torch.bool, device=device
+            )
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -327,10 +355,15 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
         # Compute adapter_indices using switch (BEFORE RoPE for position correction)
         hidden_count = None
         if self.switch is not None:
-            # Non-persistent buffers aren't moved by accelerate's device_map;
-            # ensure they're on the same device as the input.
+            # Non-persistent buffers are zeroed by accelerate's init_empty_weights()
+            # during from_pretrained with device_map. Rebuild from config on first forward.
             device = input_ids.device if input_ids is not None else inputs_embeds.device
-            if self.adapter_token_ids.device != device:
+            if self.adapter_token_ids.sum() == 0 and self.config.adapter_token_ids:
+                self.adapter_token_ids = torch.tensor(
+                    self.config.adapter_token_ids, dtype=torch.long, device=device
+                )
+                self._rebuild_hiding_buffers(device)
+            elif self.adapter_token_ids.device != device:
                 self.adapter_token_ids = self.adapter_token_ids.to(device)
                 if self.token_to_group_mask is not None:
                     self.token_to_group_mask = self.token_to_group_mask.to(device)
