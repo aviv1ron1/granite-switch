@@ -43,7 +43,38 @@ pytestmark = pytest.mark.skipif(
     reason="requires CUDA GPU and vLLM installed",
 )
 
-MODEL_ID = "ibm-granite/granite-switch-4.1-3b-preview"
+# Compose the model at import time so all tests share one composed checkpoint.
+# This is needed because the dev branch requires adapter_substitute_token_ids
+# which the pre-composed HF model doesn't have yet.
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import tempfile  # noqa: E402
+
+_COMPOSE_OUTPUT = tempfile.mkdtemp(prefix="granite_switch_composed_")
+
+
+def _compose_model():
+    """Compose granite-switch from base + adapter libraries."""
+    cmd = [
+        sys.executable, "-m", "granite_switch.composer.compose_granite_switch",
+        "--adapters",
+        "ibm-granite/granitelib-rag-r1.0",
+        "ibm-granite/granitelib-guardian-r1.0",
+        "--include-adapters", "answerability", "hallucination_detection",
+        "--output", _COMPOSE_OUTPUT,
+    ]
+    print(f"\n=== Composing model to {_COMPOSE_OUTPUT} ===")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.stdout:
+        print(result.stdout[-3000:])
+    if result.returncode != 0:
+        print("STDERR:", result.stderr[-2000:])
+        raise RuntimeError(f"Compose failed (exit {result.returncode})")
+    print(f"=== Compose complete ===\n")
+    return _COMPOSE_OUTPUT
+
+
+MODEL_ID = _compose_model()
 
 # ---------------------------------------------------------------------------
 # Test data — real adapter prompts (LoRA + aLoRA)
