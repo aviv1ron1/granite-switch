@@ -20,7 +20,11 @@ import torch
 
 pytestmark = [pytest.mark.slow, pytest.mark.requires_model, pytest.mark.gpu]
 
-MODEL_ID = "ibm-granite/granite-switch-4.1-3b-preview"
+import os
+MODEL_ID = os.environ.get(
+    "GRANITE_SWITCH_MODEL_PATH",
+    "ibm-granite/granite-switch-4.1-3b-preview",
+)
 
 # ---------------------------------------------------------------------------
 # Test data
