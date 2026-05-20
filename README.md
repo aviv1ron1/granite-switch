@@ -5,7 +5,14 @@
 
 | [**Browse Adapters**](https://huggingface.co/collections/ibm-granite/granite-libraries) | [Models on HF](https://huggingface.co/ibm-granite/granite-switch-4.1-8b-preview) | [Tutorials](tutorials/README.md) |
 
-Most AI models are monolithic — all capabilities baked into one set of weights. Granite Switch lets you compose a model from independent, task-specific components: pick the capabilities you need, compose a single checkpoint in minutes, then swap or upgrade individual components as your needs change.
+Most AI models are monolithic — all capabilities baked into one set of weights. Granite Switch lets you build models the way you build software: from modular, independently developed components. 
+Start with a base Granite model and any number of specialized LoRA or [aLoRA](https://arxiv.org/abs/2504.12397) adapters trained for specific tasks. Compose them into a single checkpoint in minutes, deploy it, then swap or upgrade individual adapters as requirements change, without retraining the entire model.
+
+The checkpoint automatically routes to the right adapter at inference time, giving you the modularity and iteration speed of software development applied to AI models.
+
+Granite Switch aims to solve the modularity problem in AI development. In software, you build features independently, update individual modules, and swap components without rebuilding everything. In traditional AI, you cannot. Models are monolithic - adding one capability means retraining from scratch. Updating one feature requires rebuilding the entire model. You deploy separate full models or accept a generalist compromise.
+
+Granite Switch brings software modularity to models. Train adapters independently, like writing modules. Compose them into one checkpoint, like building an application. Update individual adapters like shipping patches; no full retraining required. The result: AI development gains the composability and iteration speed that make software development so robust and productive.
 
 Browse available libraries in the [Granite Libraries collection](https://huggingface.co/collections/ibm-granite/granite-libraries) on Hugging Face.
 
@@ -63,6 +70,8 @@ For convenience, you can find already composed Granite Switch models for the Gra
 ### Run Inference
 
 **vLLM + Mellea (recommended):**
+
+[Mellea](https://docs.mellea.ai/) is an open-source project from IBM Research for building structured, predictable AI workflows. Granite Switch uses Mellea as its routing engine to direct tokens to the appropriate adapter at inference time
 
 ```bash
 pip install mellea
