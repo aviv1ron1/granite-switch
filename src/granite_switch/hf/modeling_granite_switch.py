@@ -284,11 +284,11 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
             batch_size, seq_length, 1, device=device, dtype=embed_dtype
         )
         causal_mask = create_causal_mask(
-            config=self.config,
-            input_embeds=mask_shape_proxy,
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
+            self.config,
+            mask_shape_proxy,
+            attention_mask,
+            cache_position,
+            past_key_values,
             position_ids=position_ids,
         )
 
