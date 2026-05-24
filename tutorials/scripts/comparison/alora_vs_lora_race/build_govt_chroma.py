@@ -5,18 +5,18 @@ The corpus is downloaded automatically from:
     https://github.com/IBM/mt-rag-benchmark/tree/main/corpora/passage_level
 
 Usage (auto-download):
-    python tutorials/alora_vs_lora_race/build_govt_chroma.py
+    python tutorials/scripts/comparison/alora_vs_lora_race/build_govt_chroma.py
 
 Usage (local file):
-    python tutorials/alora_vs_lora_race/build_govt_chroma.py \
+    python tutorials/scripts/comparison/alora_vs_lora_race/build_govt_chroma.py \
         --jsonl /tmp/govt.jsonl \
-        --output ./tutorials/alora_vs_lora_race/govt_chroma
+        --output ./tutorials/scripts/comparison/alora_vs_lora_race/govt_chroma
 
 The resulting index is bit-compatible with govt_chroma: same embedding model
 (ibm-granite/granite-embedding-small-english-r2), same mean-pooling, same
 cosine space, same document text and IDs.
 
-See also: tutorials/notebooks/02_govt_rag_pipeline.ipynb §2 for the notebook
+See also: tutorials/notebooks/rag_101.ipynb §3 for the notebook
 equivalent of this indexing step.
 """
 
