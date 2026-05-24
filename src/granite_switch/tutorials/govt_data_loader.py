@@ -1,11 +1,29 @@
 """Load or build the ChromaDB corpus for the govt RAG tutorial.
 
+.. deprecated:: 0.2.0
+    This module is deprecated and will be removed in a future release.
+    Use :mod:`granite_switch.tutorials.chroma_loader` instead, which provides:
+
+    - sentence-transformers backend for improved embedding performance
+    - Configurable max_length (1024 vs hardcoded 512)
+    - Generic loader supporting multiple data sources
+    - Maintained API compatibility via load_or_build_govt_chroma()
+
 Kept separate from the notebook so the pipeline stays focused on RAG concepts.
 
 First run: downloads `govt.jsonl.zip` from IBM mt-rag-benchmark,
 embeds with `ibm-granite/granite-embedding-small-english-r2`, and saves to
 `./govt_chroma`. Subsequent runs: loads the persisted index instantly.
 """
+
+import warnings
+
+warnings.warn(
+    "granite_switch.tutorials.govt_data_loader is deprecated and will be removed in a future release. "
+    "Please use granite_switch.tutorials.chroma_loader instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import io
 import json
