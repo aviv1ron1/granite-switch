@@ -140,13 +140,16 @@ class GraniteEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, input: Documents) -> Embeddings:
         """Embed texts with batching and progress bar."""
-        embeddings = self.model.encode(
-            input,
-            batch_size=self.batch_size,
-            max_seq_length=self.max_length,
-            show_progress_bar=False,  # Disable internal progress (we track at doc level)
-            convert_to_numpy=True,
-        )
+        # Build encode kwargs, omitting batch_size if None (let library auto-tune)
+        encode_kwargs = {
+            "max_seq_length": self.max_length,
+            "show_progress_bar": False,  # Disable internal progress (we track at doc level)
+            "convert_to_numpy": True,
+        }
+        if self.batch_size is not None:
+            encode_kwargs["batch_size"] = self.batch_size
+
+        embeddings = self.model.encode(input, **encode_kwargs)
         return embeddings.tolist()
 
 
