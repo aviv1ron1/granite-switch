@@ -136,13 +136,17 @@ class GraniteEmbeddingFunction(EmbeddingFunction):
 
         # Eager loading: model loaded immediately (clear upfront waiting)
         self.model = SentenceTransformer(model_id, device=device)
+
+        # Set max_seq_length on the model itself (not in encode() kwargs)
+        self.model.max_seq_length = max_length
+
         print(f"Granite embedding model ready on {device}  ({model_id})")
 
     def __call__(self, input: Documents) -> Embeddings:
         """Embed texts with batching and progress bar."""
         # Build encode kwargs, omitting batch_size if None (let library auto-tune)
+        # Note: max_seq_length is set on the model itself in __init__, not here
         encode_kwargs = {
-            "max_seq_length": self.max_length,
             "show_progress_bar": False,  # Disable internal progress (we track at doc level)
             "convert_to_numpy": True,
         }
