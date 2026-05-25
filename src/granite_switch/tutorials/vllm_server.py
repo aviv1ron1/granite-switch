@@ -18,7 +18,7 @@ def launch_vllm(
     model: str,
     port: int,
     log_file: str,
-    gpu_memory_utilization: float = 0.85,
+    gpu_memory_utilization: float = 0.95,
     max_num_seqs: int = 16,
     enforce_eager: bool = True,
     extra_args: Sequence[str] = (),
