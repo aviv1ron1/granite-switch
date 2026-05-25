@@ -18,7 +18,11 @@ def launch_vllm(
     model: str,
     port: int,
     log_file: str,
-    extra_args: Sequence[str] | None = None,
+    extra_args: Sequence[str] = (
+        "--gpu-memory-utilization", "0.85",
+        "--max-num-seqs", "16",
+        "--enforce-eager",
+    ),
     max_model_len: int = DEFAULT_MAX_MODEL_LEN,
 ) -> subprocess.Popen:
     cmd = [
@@ -31,9 +35,8 @@ def launch_vllm(
         str(port),
         "--max-model-len",
         str(max_model_len),
+        *extra_args,
     ]
-    if extra_args:
-        cmd += extra_args
 
     with open(log_file, "w") as log_handle:
         proc = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT)
