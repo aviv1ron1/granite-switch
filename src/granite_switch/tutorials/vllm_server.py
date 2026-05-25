@@ -14,15 +14,18 @@ import requests
 DEFAULT_MAX_MODEL_LEN = 32768  # 32k, fits comfortably on an A100 (40/80 GiB).
 
 
+_DEFAULT_VLLM_ARGS = (
+    "--gpu-memory-utilization", "0.85",
+    "--max-num-seqs", "16",
+    "--enforce-eager",
+)
+
+
 def launch_vllm(
     model: str,
     port: int,
     log_file: str,
-    extra_args: Sequence[str] = (
-        "--gpu-memory-utilization", "0.85",
-        "--max-num-seqs", "16",
-        "--enforce-eager",
-    ),
+    extra_args: Sequence[str] = (),
     max_model_len: int = DEFAULT_MAX_MODEL_LEN,
 ) -> subprocess.Popen:
     cmd = [
@@ -35,6 +38,7 @@ def launch_vllm(
         str(port),
         "--max-model-len",
         str(max_model_len),
+        *_DEFAULT_VLLM_ARGS,
         *extra_args,
     ]
 
