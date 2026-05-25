@@ -18,9 +18,9 @@ def launch_vllm(
     model: str,
     port: int,
     log_file: str,
-    gpu_memory_utilization: float = 0.95,
+    gpu_memory_utilization: float = 0.9,
     max_num_seqs: int = 1,
-    enforce_eager: bool = True,
+    enforce_eager: bool = False,
     extra_args: Sequence[str] = (),
     max_model_len: int = DEFAULT_MAX_MODEL_LEN,
 ) -> subprocess.Popen:
@@ -46,12 +46,12 @@ def launch_vllm(
     return proc
 
 
-def wait_for_server(port: int, timeout: int = 300) -> bool:
+def wait_for_server(port: int, timeout: int = 600) -> bool:
     """Poll /health until vLLM is ready."""
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
-            if requests.get(f"http://localhost:{port}/health", timeout=2).status_code == 200:
+            if requests.get(f"http://localhost:{port}/v1/models", timeout=2).status_code == 200:
                 print(f"\n  Server ready on :{port} in {int(time.time() - t0)}s")
                 return True
         except Exception:
