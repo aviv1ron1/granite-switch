@@ -57,13 +57,6 @@ debugging, or exploratory scripts in `tests/`. Use `scratch/` instead (it is git
 
 ## Development Commands
 
-### Composing Models
-
-```bash
-python -m granite_switch.composer.compose_granite_switch \
-  --adapters ibm-granite/granitelib-rag-r1.0
-```
-
 ### Testing
 
 **Always use `-v -s --tb=short`** when running tests. `-x` (fail fast) stops on the first failure —
@@ -94,21 +87,6 @@ pytest tests/vllm/test_model_forward.py -v -s --tb=short -x
 pytest tests/integration/ -v -s --tb=short -x
 ```
 
-### vLLM Deployment
-
-```bash
-# Verify plugin registration
-python -c "from vllm.plugins import load_general_plugins; \
-           from vllm import ModelRegistry; \
-           load_general_plugins(); \
-           print('OK' if 'GraniteSwitchForCausalLM' in ModelRegistry.get_supported_archs() else 'FAIL')"
-
-# Start API server
-python -m vllm.entrypoints.openai.api_server \
-  --model ./granite-with-all-aloras \
-  --port 8000
-```
-
 ## Key Configuration Parameters
 
 - **`attention_multiplier`**: Attention score scaling (instead of `1/sqrt(head_dim)`)
@@ -122,9 +100,8 @@ Always use config values — never hardcode these parameters.
 
 ### 1. Adapter Index Convention
 
-**Control tokens**: `0` = no adapter, `1+` = adapter indices
-
-**vLLM Punica kernels**: `-1` = no adapter (internal conversion: `adapter_indices - 1`)
+`0` = no adapter, `1+` = adapter index. (vLLM Punica kernels use a shifted convention internally —
+see `src/granite_switch/vllm/CLAUDE.md`.)
 
 ### 2. Control Token Generatability
 
@@ -144,43 +121,19 @@ model can produce any control token during generation.
 
 Always load from config, never hardcode.
 
-### 5. End-to-End Tests Must Use Compose Infrastructure
-
-No test should manually assemble `GraniteSwitchConfig` or call `transfer_base_weights`
-directly. All model construction must go through `GraniteSwitchComposer` so that the
-compose pipeline itself is what's being tested. If the composer can't handle a use case
-(e.g., zero-adapter skinning), extend the composer — don't work around it in tests.
-
-### 6. HF Attention Backends and Causal Masking
-
-The eager backend does NOT handle `attention_mask=None` as causal — it treats `None` as no mask
-(full attention). SDPA and FlashAttention handle `attention_mask=None` correctly via `is_causal`
-attribute on the module.
-
-The HF stress tests (`tests/hf/test_single_switch.py`) auto-detect which attention backends work on the
-current platform by probing each with a k=-inf GQA call at import time. Unavailable backends are skipped.
-
-### 7. Known Limitation: Hidden Count Offset When Position 0 is in a Hiding Group
+### 5. Hidden Count Offset When Position 0 is in a Hiding Group
 
 When position 0 is a control token in a hiding group (e.g., a LoRA prefix token with
 `add_bos_token=False`), `hidden_count` is off by 1, causing a 1-position RoPE offset. This is
 acceptable because adapter detection is exact and RoPE is robust to small positional shifts.
 
-### 8. Known Limitation: TP Row-Parallel Bias Doubling
+### Backend- and module-specific gotchas
 
-`SwitchedLoRALinear`'s row-parallel bypass path passes bias to all TP ranks instead of
-suppressing it for rank > 0. After all-reduce this doubles the bias. Not affected: all Granite
-architectures (4.0, 4.1) use `attention_bias=False` and `mlp_bias=False`.
+Loaded on demand from child CLAUDE.md files when you touch those modules:
 
-### 9. HF Backend Uses Fused Projections (Not Bit-Exact with Upstream HF)
-
-The GraniteSwitch HF backend uses fused QKV and gate-up projections, symmetric with the vLLM
-backend architecture. Upstream HuggingFace `GraniteMoeHybridForCausalLM` uses separate projections.
-Fused projections change the floating-point reduction order, so bit-exact skinning equivalence
-with the upstream HF model is not achievable. The vLLM skinning equivalence tests are the
-authoritative check — both the upstream and skinned models use the same fused-projection
-architecture there. The HF skinning tests in `tests/composer/test_skinning_equivalence.py` are
-skipped for this reason.
+- `src/granite_switch/hf/CLAUDE.md` — HF attention backends, fused projections vs upstream HF
+- `src/granite_switch/vllm/CLAUDE.md` — Punica `-1` index, TP row-parallel bias, deployment commands
+- `src/granite_switch/composer/CLAUDE.md` — compose-infra rule for e2e tests, compose CLI
 
 ## Documentation
 
