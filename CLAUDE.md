@@ -12,7 +12,6 @@ Key layout rules — full tree via `find src/` or `find tests/`:
 
 - `src/granite_switch/` — unified package; `composer/`, `hf/`, `vllm/` match the optional extras
 - `tests/` — official test suite only; subdirs: `unit/`, `hf/`, `vllm/`, `composer/`, `integration/`, `regression/`, `shared/`
-- `scratch/` — gitignored; use this for throwaway diagnostic scripts (not `tests/`)
 - `tutorials/` — notebooks and guides; see `tutorials/CLAUDE.md` for conventions
 
 ## Installation (local/dev)
@@ -36,9 +35,9 @@ pip install -e ".[hf,compose]"  # HF + composer only (no vLLM)
 ### Test Files (Python)
 
 **`tests/` is for official regression tests ONLY.** Do NOT place throwaway diagnostic,
-debugging, or exploratory scripts in `tests/`. Use `scratch/` instead (it is gitignored).
-Running `pytest tests/` should only execute curated, maintained tests — never one-off
-investigations. Subdirectories are listed in Project Structure above.
+debugging, or exploratory scripts in `tests/` — `pytest tests/` should only execute
+curated, maintained tests, never one-off investigations. Subdirectories are listed in
+Project Structure above.
 
 ### Documentation Naming
 
