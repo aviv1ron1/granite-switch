@@ -84,3 +84,26 @@ conflicts = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["tests/_legacy", "scratch", "tutorials"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "W",    # pycodestyle warnings
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+]
+ignore = [
+    "E501",  # line-too-long (formatter handles it; long strings/URLs are fine)
+    "B008",  # function call in default arg (common in PyTorch/HF APIs)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

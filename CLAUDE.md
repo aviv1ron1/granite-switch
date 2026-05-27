@@ -370,6 +370,31 @@ authoritative check — both the upstream and skinned models use the same fused-
 architecture there. The HF skinning tests in `tests/composer/test_skinning_equivalence.py` are
 skipped for this reason.
 
+## Pre-commit
+
+This repo uses [pre-commit](https://pre-commit.com/) with ruff (lint + format), nbstripout,
+and the standard hygiene hooks (whitespace, EOF, YAML/TOML validity, merge conflicts, large
+files).
+
+After cloning:
+
+```bash
+pip install pre-commit
+pre-commit install
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+Hooks run on `git commit`. Most are auto-fixing - if a hook modifies files, re-stage and
+commit again. Do NOT use `--no-verify` to bypass; fix the underlying issue instead. Run
+`pre-commit run --all-files` to apply hooks across the full tree, and `pre-commit autoupdate`
+periodically to bump pinned hook versions.
+
+What is intentionally NOT in pre-commit (run in CI instead):
+
+- `pytest` (GPU tests, vLLM - too slow for commit time)
+- `mypy` / type checking (too slow)
+- Notebook execution
+
 ## Documentation
 
 - `docs/GIT_WORKFLOW.md` - Git branching strategy and commit guidelines
