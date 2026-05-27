@@ -48,10 +48,10 @@ Other install options depending on your use case:
 pip install "granite-switch[compose]"   # Compose modular models
 pip install "granite-switch[hf]"        # HuggingFace inference
 pip install "granite-switch[vllm20]"    # vLLM 0.20+ (requires CUDA 13+)
-pip install "granite-switch[dev]"       # Everything
+pip install "granite-switch[dev]"       # HF + vLLM 0.19.x + compose + tests
 ```
 
-Requires Python 3.9+ and PyTorch 2.0+. Two vLLM backends are available: `.[vllm]` for broad CUDA 12.x compatibility (0.19.x), and `.[vllm20]` for the latest performance improvements (CUDA 13+).
+Requires Python 3.11–3.13 and PyTorch 2.10+. Two vLLM backends are available: `.[vllm]` for vLLM 0.19.x, and `.[vllm20]` for vLLM 0.20.x.
 
 ### Compose a Model
 

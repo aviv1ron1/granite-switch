@@ -15,7 +15,7 @@ Setup requirements for running Granite Switch tutorials.
 
 ### Python Version
 
-Python 3.10+ is required.
+Python 3.11–3.13 is required.
 
 ### Base Installation
 
@@ -84,7 +84,7 @@ Official IBM Granite adapter libraries (r1.0):
 
 | Library | Adapters | Purpose |
 |---------|----------|---------|
-| [ibm-granite/granitelib-rag-r1.0](https://huggingface.co/ibm-granite/granitelib-rag-r1.0) | 5 | RAG adapters (rewrite, answerability, citations, etc.) |
+| [ibm-granite/granitelib-rag-r1.0](https://huggingface.co/ibm-granite/granitelib-rag-r1.0) | 6 | RAG adapters (rewrite, answerability, citations, etc.) |
 | [ibm-granite/granitelib-core-r1.0](https://huggingface.co/ibm-granite/granitelib-core-r1.0) | 3 | Core adapters (certainty, requirements, attributions) |
 | [ibm-granite/granitelib-guardian-r1.0](https://huggingface.co/ibm-granite/granitelib-guardian-r1.0) | 4 | Guardian adapters (harm check, policy, factuality, etc.) |
 
