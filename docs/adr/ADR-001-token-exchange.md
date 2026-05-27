@@ -91,10 +91,15 @@ is now required when `num_adapters > 0`.
 
 ## Alternatives considered
 
-**Keep KV-hiding behind a feature flag.** Rejected: maintaining the dual path was
-the source of most config complexity and ~3000 LoC. Once token exchange was proven
-equivalent on the supported models, the legacy path's ongoing cost outweighed the
-backwards-compatibility benefit (recomposing a checkpoint takes minutes).
+**Minimize `control_dims` from 32 to 1** (Solution B in [issue #8](https://github.com/generative-computing/granite-switch/issues/8)).
+The legacy scheme allocated 32 extra Q/K/V dimensions, but only `num_hiding_groups`
+(typically 1) were ever non-zero. Setting `control_dims = num_hiding_groups` would
+have cut the padding overhead substantially without any chat-template or switch-layer
+changes. Rejected: it reduces the cost but doesn't eliminate it — KV cache still grows
+(`head_dim + 1` instead of native), FlashAttention still falls off its fast path on
+non-native head dims, and the `hidden_count` RoPE-correction gotcha stays. Token
+exchange achieves zero overhead at the same engineering cost, so the fallback wasn't
+worth shipping.
 
 **Train a learned hiding mechanism (e.g., gated K projection).** Rejected: requires
 retraining the base model or fine-tuning the adapters, which is outside the scope of
