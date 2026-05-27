@@ -14,10 +14,10 @@ K vectors would distort attention from real tokens.
 
 Costs of that approach on Granite 4.1-8b:
 
-- KV cache `head_dim` expanded from native 128 → 160, padded to 192.
-- FlashAttention's fast path required native head dims, so the padded vectors fell
-  back to a slower kernel.
-- ~20% extra KV memory and ~33% extra attention compute per layer.
+- KV cache `head_dim` expanded from native 128 → 160. FlashAttention internally
+  pads 160 → 192, so the attention kernel operates on 192-dim vectors when only
+  128 carry content.
+- +25% KV cache size (8b: 160 vs native 128). 4.1-3b is worse: +50% (96 vs 64).
 - A `hidden_count` position-correction pass (see legacy gotcha in CLAUDE.md history)
   to keep RoPE aligned despite the hidden tokens.
 - Config carried `control_dims`, `hiding_groups`, `hiding_policy`,
@@ -69,12 +69,13 @@ is now required when `num_adapters > 0`.
 
 **Positive:**
 
-- KV cache `head_dim` returns to native 128 (from 192). FlashAttention runs on the
-  native vectors.
-- ~20% less KV memory, ~33% less attention compute per layer on Granite 4.1-8b.
+- KV cache `head_dim` returns to native 128 (from 160, FA-padded to 192).
+  FlashAttention runs on the native vectors.
+- KV cache size matches the base model — no per-position overhead from
+  control-dimension padding.
 - No retraining required — substitute ids are already embeddings the model handles.
-- ~3000 LoC deleted net (config helpers, dual-path expand/contract logic, hiding
-  reports, position-correction tests).
+- ~2900 lines removed, ~1500 added (PR #34: -2849 / +1510), covering config helpers,
+  dual-path expand/contract logic, hiding reports, and position-correction tests.
 - `hidden_count` RoPE-offset gotcha is gone; positions are simply correct.
 
 **Negative / breaking:**
