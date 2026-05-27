@@ -374,6 +374,7 @@ skipped for this reason.
 
 - `docs/GIT_WORKFLOW.md` - Git branching strategy and commit guidelines
 - `docs/SUPPORTED_MODELS.md` - Model compatibility
+- `docs/adr/` - Architecture Decision Records (why we built it this way)
 
 ## Git Workflow
 
