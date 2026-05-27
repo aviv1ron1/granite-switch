@@ -30,6 +30,14 @@ Use cell id `hf-login-call` for consistency.
 Add `# Estimated duration: ~2 min on A100, ~7 min on T4` to cells that download models or
 launch vLLM. Put these in **notebook cells only** — not in code files under `src/`.
 
+## Skills
+
+- `/validate-links` — run before any PR that renames, moves, or restructures notebooks or docs.
+  Scans all `.ipynb`/`.md`/`.py` files for broken local links, stale labels, and broken
+  first-party imports. Proposes fixes; never edits without confirmation.
+- `/tutorial-notebook` — run when creating or polishing a notebook. Applies a 15-item checklist
+  (structure, bugs, imports, comments, diagrams, demo coverage, next-steps wiring).
+
 ## Utility Modules
 
 These live in `src/granite_switch/tutorials/` and are imported by notebooks:

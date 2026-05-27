@@ -66,6 +66,12 @@ Before committing:
 2. **Check comments match code** — stale comments are worse than no comments
 3. **Update docs** if behavior changed
 
+## Before opening a PR that touches notebooks or docs
+
+Run `/validate-links` to catch broken local links, stale labels, and broken first-party imports
+introduced by any renames or restructuring. It scans all `.ipynb`, `.md`, and `.py` files and
+proposes fixes before anything goes to reviewers.
+
 ## Pull Requests
 
 - Target the `main` branch
