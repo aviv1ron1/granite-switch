@@ -39,10 +39,10 @@ pytestmark = pytest.mark.skipif(
     reason="requires vLLM installed (GPU checked by worker)",
 )
 
-from tests.shared.single_switch_cases import (
+from tests.shared.single_switch_cases import (  # noqa: E402
+    ADAPTER_TOKEN_IDS_LIST,
     NUM_ADAPTERS,
     TEXT_TOKEN,
-    ADAPTER_TOKEN_IDS_LIST,
 )
 
 # Worker's deterministic substitute mapping: control_id (1000+i) → sub_id (i+1).
@@ -146,20 +146,20 @@ class TestLUTMapping:
             "missing from worker mock config?"
         )
         for ctrl_id, sub_id in zip(
-            ADAPTER_TOKEN_IDS_LIST, ADAPTER_SUBSTITUTE_TOKEN_IDS_LIST
+            ADAPTER_TOKEN_IDS_LIST, ADAPTER_SUBSTITUTE_TOKEN_IDS_LIST, strict=False
         ):
-            assert lut[ctrl_id] == sub_id, (
-                f"lut[{ctrl_id}]={lut[ctrl_id]}, expected substitute {sub_id}"
-            )
+            assert (
+                lut[ctrl_id] == sub_id
+            ), f"lut[{ctrl_id}]={lut[ctrl_id]}, expected substitute {sub_id}"
 
     def test_lut_marks_non_control_with_sentinel(self):
         lut = _send_command({"command": "query_lut"})
         assert lut is not None
         # TEXT_TOKEN (50) and a few arbitrary non-control ids should be -1.
         for non_control in [TEXT_TOKEN, 0, 51, 52, 999]:
-            assert lut[non_control] == -1, (
-                f"lut[{non_control}]={lut[non_control]}, expected -1 sentinel"
-            )
+            assert (
+                lut[non_control] == -1
+            ), f"lut[{non_control}]={lut[non_control]}, expected -1 sentinel"
 
 
 class TestInputRewrite:

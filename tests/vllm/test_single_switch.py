@@ -29,16 +29,16 @@ pytestmark = pytest.mark.skipif(
     reason="requires vLLM installed (GPU checked by worker)",
 )
 
-from tests.shared.single_switch_cases import (
+from tests.shared.single_switch_cases import (  # noqa: E402
+    ADAPTER_TOKEN_IDS_LIST,
     NUM_ADAPTERS,
     TEXT_TOKEN,
-    ADAPTER_TOKEN_IDS_LIST,
-    SingleSwitchTokenMatchingCases,
     SingleSwitchAdapterRetrievalCases,
-    SingleSwitchEdgeCases,
-    SingleSwitchShapeCorrectnessCases,
     SingleSwitchContextLengthSweepCases,
+    SingleSwitchEdgeCases,
     SingleSwitchGainSensitivityCases,
+    SingleSwitchShapeCorrectnessCases,
+    SingleSwitchTokenMatchingCases,
 )
 
 # ── Worker management ─────────────────────────────────────────────
@@ -154,6 +154,7 @@ def _query_geometry():
 # Release the GPU when this module's tests are done, so Pattern B
 # subprocess tests in later files can claim it.
 
+
 @pytest.fixture(autouse=True, scope="module")
 def _worker_lifecycle():
     yield
@@ -161,6 +162,7 @@ def _worker_lifecycle():
 
 
 # ── vLLM _run adapter ───────────────────────────────────────────────
+
 
 class _VLLMSingleSwitchBase:
     """Provides _run() for shared mixin tests via worker subprocess."""
@@ -171,6 +173,7 @@ class _VLLMSingleSwitchBase:
 
 
 # ── Shared test classes (from mixin) ────────────────────────────────
+
 
 class TestTokenMatching(_VLLMSingleSwitchBase, SingleSwitchTokenMatchingCases):
     pass
@@ -219,6 +222,7 @@ class TestGainRoundTrip:
     @pytest.mark.parametrize("attention_multiplier", [0.0078125, 0.015625, 0.0625, 0.125, 1.0])
     def test_gain_roundtrip_bf16(self, attention_multiplier):
         import torch
+
         gain = torch.tensor(15.0, dtype=torch.bfloat16)
         multiplier = torch.tensor(attention_multiplier, dtype=torch.bfloat16)
         effective = gain / multiplier
@@ -245,12 +249,12 @@ class TestKVCacheShape:
     def test_kv_cache_shape(self):
         info = _query_geometry()
         shape = info["kv_cache_shape"]
-        assert shape[3] == info["num_kv_heads"], (
-            f"Expected num_kv_heads={info['num_kv_heads']} at dim 3, got {shape[3]}"
-        )
-        assert shape[4] == info["head_dim"], (
-            f"Expected head_dim={info['head_dim']} at dim 4, got {shape[4]}"
-        )
+        assert (
+            shape[3] == info["num_kv_heads"]
+        ), f"Expected num_kv_heads={info['num_kv_heads']} at dim 3, got {shape[3]}"
+        assert (
+            shape[4] == info["head_dim"]
+        ), f"Expected head_dim={info['head_dim']} at dim 4, got {shape[4]}"
 
 
 class TestFallbackGeometry:

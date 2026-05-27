@@ -7,8 +7,6 @@ This implementation extends the base Granite model with:
 3. Control token masking to prevent KV cache corruption
 """
 
-from typing import Optional, Tuple, Union
-
 import torch
 import torch.nn as nn
 from transformers.cache_utils import Cache, DynamicCache
@@ -25,11 +23,12 @@ from transformers.models.granitemoehybrid.modeling_granitemoehybrid import (
 from transformers.utils import logging
 
 from granite_switch.config import GraniteSwitchConfig
-from .switch import create_switch
+
 from .core.lora import (
     GraniteLoRAEmbeddedAttention,
     replace_shared_mlp_projections_with_lora,
 )
+from .switch import create_switch
 
 logger = logging.get_logger(__name__)
 
@@ -63,7 +62,9 @@ class GraniteSwitchAttentionDecoderLayer(nn.Module):
 
         # Layer norms
         self.input_layernorm = GraniteMoeHybridRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = GraniteMoeHybridRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = GraniteMoeHybridRMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def _set_shared_mlp_context(self, adapter_indices):
         if self._has_shared_input_lora:
@@ -74,14 +75,14 @@ class GraniteSwitchAttentionDecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        output_attentions: Optional[bool] = False,
-        use_cache: Optional[bool] = False,
-        cache_position: Optional[torch.LongTensor] = None,
-        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
-        adapter_indices: Optional[torch.Tensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: Cache | None = None,
+        output_attentions: bool | None = False,
+        use_cache: bool | None = False,
+        cache_position: torch.LongTensor | None = None,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        adapter_indices: torch.Tensor | None = None,
         **kwargs,
     ) -> tuple:
         residual = hidden_states
@@ -225,21 +226,25 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        return_dict: Optional[bool] = None,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: Cache | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        return_dict: bool | None = None,
         **kwargs,
     ) -> BaseModelOutputWithPast:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions if output_attentions is not None else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -267,7 +272,9 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
             device = inputs_embeds.device
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
             cache_position = torch.arange(
                 past_seen_tokens, past_seen_tokens + seq_length, device=device
             )
@@ -280,8 +287,10 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
         # haven't embedded yet (the switch call below may rewrite input_ids
         # first), so pass a stub of the right shape/dtype.
         embed_dtype = self.embed_tokens.weight.dtype
-        mask_shape_proxy = inputs_embeds if inputs_embeds is not None else torch.empty(
-            batch_size, seq_length, 1, device=device, dtype=embed_dtype
+        mask_shape_proxy = (
+            inputs_embeds
+            if inputs_embeds is not None
+            else torch.empty(batch_size, seq_length, 1, device=device, dtype=embed_dtype)
         )
         causal_mask = create_causal_mask(
             config=self.config,
@@ -306,7 +315,9 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
             )
         else:
             adapter_indices = torch.zeros(
-                (batch_size, seq_length), dtype=torch.long, device=device,
+                (batch_size, seq_length),
+                dtype=torch.long,
+                device=device,
             )
 
         # Embed once, on the (possibly-rewritten) input_ids. The decoder is
@@ -357,7 +368,11 @@ class GraniteSwitchModel(GraniteSwitchPreTrainedModel):
             all_hidden_states += (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, past_key_values, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [hidden_states, past_key_values, all_hidden_states, all_self_attns]
+                if v is not None
+            )
 
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
@@ -403,23 +418,27 @@ class GraniteSwitchForCausalLM(GraniteSwitchPreTrainedModel, GenerationMixin):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        logits_to_keep: Union[int, torch.Tensor] = 0,
-        return_dict: Optional[bool] = None,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: Cache | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
+        return_dict: bool | None = None,
         **kwargs,
     ) -> CausalLMOutputWithPast:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions if output_attentions is not None else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
 
         outputs = self.model(
@@ -437,13 +456,17 @@ class GraniteSwitchForCausalLM(GraniteSwitchPreTrainedModel, GenerationMixin):
 
         hidden_states = outputs.last_hidden_state
 
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        slice_indices = (
+            slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        )
         logits = self.lm_head(hidden_states[:, slice_indices, :])
         logits = logits / self.config.logits_scaling
 
         loss = None
         if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
+            loss = self.loss_function(
+                logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs
+            )
 
         return CausalLMOutputWithPast(
             loss=loss,

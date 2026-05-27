@@ -73,9 +73,7 @@ class TestDecodeAloraInvocationText:
 
     def test_empty_list_raises(self, tmp_path):
         """ValueError when alora_invocation_tokens is an empty list."""
-        (tmp_path / "adapter_config.json").write_text(
-            json.dumps({"alora_invocation_tokens": []})
-        )
+        (tmp_path / "adapter_config.json").write_text(json.dumps({"alora_invocation_tokens": []}))
         with pytest.raises(ValueError, match="alora_invocation_tokens"):
             _decode_alora_invocation_text(str(tmp_path), MockTokenizer())
 
@@ -114,8 +112,12 @@ class TestAddControlTokens:
     def test_control_token_ids_sequential(self, capsys):
         """Verify token IDs are assigned sequentially."""
         tokenizer = MockTokenizer(initial_vocab_size=50)
-        adapters = [("/a", "alpha", "alora"), ("/b", "beta", "lora"),
-                    ("/c", "gamma", "alora"), ("/d", "delta", "lora")]
+        adapters = [
+            ("/a", "alpha", "alora"),
+            ("/b", "beta", "lora"),
+            ("/c", "gamma", "alora"),
+            ("/d", "delta", "lora"),
+        ]
 
         token_ids, _ = add_control_tokens(tokenizer, adapters)
 

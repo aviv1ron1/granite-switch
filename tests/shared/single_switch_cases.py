@@ -67,7 +67,14 @@ class SingleSwitchAdapterRetrievalCases:
 
     def test_single_switch_persists(self):
         """After one control token, all subsequent positions return its adapter ID."""
-        seq = [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[2], TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN]
+        seq = [
+            TEXT_TOKEN,
+            ADAPTER_TOKEN_IDS_LIST[2],
+            TEXT_TOKEN,
+            TEXT_TOKEN,
+            TEXT_TOKEN,
+            TEXT_TOKEN,
+        ]
         result = self._run(seq, num_adapters=4)
         assert all(v == 3 for v in result[2:])
 
@@ -79,8 +86,13 @@ class SingleSwitchAdapterRetrievalCases:
 
     def test_duplicate_control_tokens(self):
         """Same adapter token appearing twice still returns correct ID."""
-        seq = [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[0], TEXT_TOKEN,
-               ADAPTER_TOKEN_IDS_LIST[0], TEXT_TOKEN]
+        seq = [
+            TEXT_TOKEN,
+            ADAPTER_TOKEN_IDS_LIST[0],
+            TEXT_TOKEN,
+            ADAPTER_TOKEN_IDS_LIST[0],
+            TEXT_TOKEN,
+        ]
         result = self._run(seq, num_adapters=4)
         assert all(v == 1 for v in result[1:])
 
@@ -129,8 +141,13 @@ class SingleSwitchEdgeCases:
 
     def test_mixed_adapters_no_crash(self):
         """Two different adapter tokens: must not crash or produce out-of-range."""
-        seq = [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[0], ADAPTER_TOKEN_IDS_LIST[1],
-               TEXT_TOKEN, TEXT_TOKEN]
+        seq = [
+            TEXT_TOKEN,
+            ADAPTER_TOKEN_IDS_LIST[0],
+            ADAPTER_TOKEN_IDS_LIST[1],
+            TEXT_TOKEN,
+            TEXT_TOKEN,
+        ]
         result = self._run(seq, num_adapters=4)
         assert all(0 <= v <= 4 for v in result)
 
@@ -166,17 +183,20 @@ class SingleSwitchContextLengthSweepCases:
     """
 
     @pytest.mark.parametrize("adapter_idx", range(NUM_ADAPTERS))
-    @pytest.mark.parametrize("context_length,control_position", [
-        (100, "early"),
-        (100, "mid"),
-        (100, "late"),
-        (1000, "early"),
-        (1000, "mid"),
-        (1000, "late"),
-        (10000, "early"),
-        (10000, "mid"),
-        (10000, "late"),
-    ])
+    @pytest.mark.parametrize(
+        "context_length,control_position",
+        [
+            (100, "early"),
+            (100, "mid"),
+            (100, "late"),
+            (1000, "early"),
+            (1000, "mid"),
+            (1000, "late"),
+            (10000, "early"),
+            (10000, "mid"),
+            (10000, "late"),
+        ],
+    )
     def test_single_switch_at_distance(self, context_length, control_position, adapter_idx):
         """One control token, rest text. Verify adapter persists to end."""
         if control_position == "early":
@@ -233,7 +253,6 @@ class SingleSwitchContextLengthSweepCases:
             f"in context {context_length}"
         )
 
-
     @pytest.mark.parametrize("adapter_idx", [0, 15, 31])
     def test_high_adapter_at_long_context(self, adapter_idx):
         """Gain-compensated geometry preserves precision at 10K for high adapter IDs."""
@@ -246,9 +265,9 @@ class SingleSwitchContextLengthSweepCases:
         assert result[0] == 0
         post = result[1:]
         failures = sum(1 for v in post if v != expected_id)
-        assert failures == 0, (
-            f"Post-control: {failures}/{len(post)} wrong for adapter {expected_id}"
-        )
+        assert (
+            failures == 0
+        ), f"Post-control: {failures}/{len(post)} wrong for adapter {expected_id}"
 
 
 class SingleSwitchGainSensitivityCases:
@@ -273,7 +292,7 @@ class SingleSwitchGainSensitivityCases:
 
         # With gain=1 the tail positions should NOT reliably return adapter 1.
         # We check that at least some of the tail positions have drifted to 0.
-        tail = result[context_length // 2:]
+        tail = result[context_length // 2 :]
         wrong = sum(1 for v in tail if v != 1)
         assert wrong > 0, (
             "Expected low-gain degradation at context 10K but all tail "
@@ -290,6 +309,6 @@ class SingleSwitchGainSensitivityCases:
 
         post = result[1:]
         failures = sum(1 for v in post if v != 1)
-        assert failures == 0, (
-            f"gain=15 should preserve signal but got {failures}/{len(post)} failures"
-        )
+        assert (
+            failures == 0
+        ), f"gain=15 should preserve signal but got {failures}/{len(post)} failures"

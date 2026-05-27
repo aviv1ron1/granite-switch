@@ -2,9 +2,9 @@
 """Core LoRA primitives for Granite Switch (HuggingFace)."""
 
 from .lora import (
-    SwitchedLoRALinear,
-    MergedSwitchedLoRALinear,
     GraniteLoRAEmbeddedAttention,
+    MergedSwitchedLoRALinear,
+    SwitchedLoRALinear,
 )
 
 __all__ = [

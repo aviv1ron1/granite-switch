@@ -51,6 +51,7 @@ def _dtype_str(dtype):
 
 # ── build mode ────────────────────────────────────────────────────
 
+
 def cmd_build(args):
     """Build a GraniteSwitch model with 1 zero-weight built-in adapter."""
     from granite_switch.composer import GraniteSwitchComposer
@@ -75,15 +76,18 @@ def cmd_build(args):
     # Save inputs
     inputs_path = os.path.join(work_dir, "inputs.json")
     with open(inputs_path, "w") as f:
-        json.dump({
-            "prompt_ids": prompt_ids,
-            "adapter_token_id": adapter_token_id,
-            "vocab_size": vocab_size,
-        }, f)
+        json.dump(
+            {
+                "prompt_ids": prompt_ids,
+                "adapter_token_id": adapter_token_id,
+                "vocab_size": vocab_size,
+            },
+            f,
+        )
     print(f"  saved inputs to {inputs_path}")
 
     # Build switch model with 1 built-in adapter
-    print(f"\nBuilding GraniteSwitch (1 built-in adapter)...")
+    print("\nBuilding GraniteSwitch (1 built-in adapter)...")
     skin_dir = os.path.join(work_dir, "switch")
     model = GraniteSwitchComposer.from_base_and_adapters(
         model_name,
@@ -111,12 +115,14 @@ def cmd_build(args):
 
 # ── run mode ──────────────────────────────────────────────────────
 
+
 def cmd_run(args):
     """Load a model in vLLM, run greedy generation, save token IDs."""
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
+
     from granite_switch.vllm import register as register_granite_switch
 
     register_granite_switch()
@@ -173,6 +179,7 @@ def cmd_run(args):
 
 # ── compare mode ──────────────────────────────────────────────────
 
+
 def cmd_compare(args):
     """Load two token-ID JSONs and check token-for-token match."""
     work_dir = args.work_dir
@@ -198,7 +205,7 @@ def cmd_compare(args):
         print(f"\nFAIL: {label} — length mismatch: ref={len(ref_ids)}, switch={len(sw_ids)}")
         return 1
 
-    for i, (r, s) in enumerate(zip(ref_ids, sw_ids)):
+    for i, (r, s) in enumerate(zip(ref_ids, sw_ids, strict=False)):
         if r != s:
             msg = f"\nFAIL: {label} — first divergence at position {i}: ref={r}, switch={s}"
             if r == adapter_token_id or s == adapter_token_id:
@@ -209,12 +216,12 @@ def cmd_compare(args):
             print(msg)
             return 1
 
-    print(f"\nPASS: {label} — token-for-token generation equivalence "
-          f"[{len(ref_ids)} tokens]")
+    print(f"\nPASS: {label} — token-for-token generation equivalence " f"[{len(ref_ids)} tokens]")
     return 0
 
 
 # ── CLI ───────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -233,7 +240,9 @@ def main():
 
     # compare
     p_compare = sub.add_parser("compare", help="Compare two token-ID JSONs")
-    p_compare.add_argument("--work-dir", required=True, help="Working directory with ref.json and switch.json")
+    p_compare.add_argument(
+        "--work-dir", required=True, help="Working directory with ref.json and switch.json"
+    )
     p_compare.add_argument("--label", required=True, help="Model label for output")
 
     args = parser.parse_args()

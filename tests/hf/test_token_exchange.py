@@ -9,7 +9,6 @@ Two properties under test:
    does not expand the KV cache.
 """
 
-import pytest
 import torch
 
 from granite_switch.config import GraniteSwitchConfig

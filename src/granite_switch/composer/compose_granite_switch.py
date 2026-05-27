@@ -48,8 +48,6 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
-from granite_switch.composer.arch import resolve_arch
-from granite_switch.composer.compose_utils import GraniteSwitchComposer
 from granite_switch.composer.adapter_discovery import (
     discover_adapters,
     discover_adapters_from_yaml,
@@ -59,13 +57,14 @@ from granite_switch.composer.adapter_discovery import (
     list_repo_adapters_remote,
     resolve_repo_path,
 )
+from granite_switch.composer.arch import resolve_arch
+from granite_switch.composer.compose_utils import GraniteSwitchComposer
+from granite_switch.composer.reporting import generate_compose_report, write_build_doc
 from granite_switch.composer.tokenizer_setup import (
     add_control_tokens,
     configure_chat_template,
     get_alora_first_invocation_token_id,
 )
-from granite_switch.composer.reporting import generate_compose_report, write_build_doc
-
 
 # ---------------------------------------------------------------------------
 # Utility helpers (kept local — not worth a separate module)
@@ -112,8 +111,7 @@ def _probe_lora_substitute_token_id(tokenizer) -> int:
     """
     if tokenizer.chat_template is None:
         raise ValueError(
-            "Tokenizer has no chat_template; cannot probe the LoRA "
-            "substitute token."
+            "Tokenizer has no chat_template; cannot probe the LoRA " "substitute token."
         )
     try:
         probe_text = tokenizer.apply_chat_template(
@@ -149,19 +147,19 @@ def _get_directory_size(directory):
         for dirpath, _dirnames, filenames in os.walk(directory):
             # Prune hidden directories in-place
             # This skips folders like '.git', '.cache', etc.
-            _dirnames[:] = [d for d in _dirnames if not d.startswith('.')]
-            
+            _dirnames[:] = [d for d in _dirnames if not d.startswith(".")]
+
             for filename in filenames:
-                if filename.startswith('.'):
+                if filename.startswith("."):
                     continue
-                
+
                 filepath = os.path.join(dirpath, filename)
                 try:
                     total_size += os.path.getsize(filepath)
                     file_count += 1
                 except OSError:
                     pass
-        
+
         gb_size = total_size / (1024**3)
         return gb_size, file_count
     return None, None
@@ -260,7 +258,7 @@ def _create_adapter_index(
     }
 
     for adapter_idx, (adapter_info, io_config_path) in enumerate(
-        zip(discovered_adapters, io_config_paths)
+        zip(discovered_adapters, io_config_paths, strict=False)
     ):
         adapter_path, adapter_name, technology = adapter_info[:3]
         source = adapter_info[3] if len(adapter_info) > 3 else None
@@ -414,11 +412,7 @@ _EXPECTED_SAVE_FILES = {
 def _snapshot_directory(directory):
     """Return ``{filename: mtime}`` for top-level files in *directory*."""
     d = Path(directory)
-    return {
-        entry.name: entry.stat().st_mtime
-        for entry in d.iterdir()
-        if entry.is_file()
-    }
+    return {entry.name: entry.stat().st_mtime for entry in d.iterdir() if entry.is_file()}
 
 
 def _validate_save_pretrained_writes(before, after, output_path):
@@ -539,7 +533,7 @@ Examples:
         nargs="*",
         default=None,
         help="Only include adapters matching these names/patterns (fnmatch glob). "
-             "Example: --include-adapters answerability 'query_*'",
+        "Example: --include-adapters answerability 'query_*'",
     )
     parser.add_argument(
         "--exclude-adapters",
@@ -547,8 +541,8 @@ Examples:
         nargs="*",
         default=None,
         help="Exclude adapters matching these names/patterns (applied after "
-             "--include-adapters). "
-             "Example: --exclude-adapters hallucination_detection",
+        "--include-adapters). "
+        "Example: --exclude-adapters hallucination_detection",
     )
     parser.add_argument(
         "--technology-filter",
@@ -556,7 +550,7 @@ Examples:
         default=None,
         choices=["alora", "lora"],
         help="Only include adapters of this technology type. "
-             "Unlike --technology, this filters rather than overriding the label.",
+        "Unlike --technology, this filters rather than overriding the label.",
     )
     parser.add_argument(
         "--list-adapters",
@@ -571,8 +565,6 @@ Examples:
         help="Include debug fields (original_path) in adapter_index.json",
     )
     return parser
-
-
 
 
 def build():
@@ -594,9 +586,7 @@ def build():
             local = Path(entry)
             if "/" in entry and not local.exists():
                 try:
-                    available = list_repo_adapters_remote(
-                        entry, args.target_model
-                    )
+                    available = list_repo_adapters_remote(entry, args.target_model)
                 except Exception as e:
                     print(f"Failed to list adapters from {entry}: {e}")
                     return 1
@@ -610,9 +600,7 @@ def build():
                 if not is_adapter_library(resolved_path):
                     print(f"\n{entry} is a single adapter, not a library.")
                     continue
-                available = list_available_adapters(
-                    resolved_path, args.target_model
-                )
+                available = list_available_adapters(resolved_path, args.target_model)
 
             if not available:
                 print(f"\nNo adapters found in {entry} for target '{args.target_model}'")
@@ -643,6 +631,7 @@ def build():
 
     # Load base config early for arch resolution.
     from granite_switch.composer.arch import load_base_config
+
     base_config = load_base_config(base_model_local_path)
     arch = resolve_arch(base_model_local_path, base_config=base_config)
 
@@ -677,7 +666,10 @@ def build():
                 # Adapter library — discover individual adapters inside
                 print("  Detected adapter library, scanning for adapters...")
                 found = discover_adapters(
-                    resolved_path, args.target_model, arch, args.technology,
+                    resolved_path,
+                    args.target_model,
+                    arch,
+                    args.technology,
                     technology_filter=args.technology_filter,
                     source=entry,
                 )
@@ -715,9 +707,7 @@ def build():
                     adapter_name = entry
 
                 # 4-tuple: (path, name, technology, source)
-                discovered_adapters.append(
-                    (resolved_path, adapter_name, technology, entry)
-                )
+                discovered_adapters.append((resolved_path, adapter_name, technology, entry))
                 print(f"  Added adapter: {adapter_name} ({technology})")
 
     if not discovered_adapters and not args.built_in_adapters:
@@ -729,9 +719,7 @@ def build():
     # External adapters occupy slots 0..N-1, built-ins occupy N..N+M-1.
     # Tuples are 4-element: (path, name, technology, source)
     external_discovered = list(discovered_adapters)
-    built_in_discovered = [
-        (None, name, "builtin", None) for name in (args.built_in_adapters or [])
-    ]
+    built_in_discovered = [(None, name, "builtin", None) for name in (args.built_in_adapters or [])]
     all_discovered = external_discovered + built_in_discovered
 
     has_external = len(external_discovered) > 0
@@ -830,7 +818,9 @@ def build():
         adapter_names=adapter_names,
         built_in_adapter_names=built_in_names,
         built_in_lora_rank=args.lora_rank,
-        built_in_lora_alpha=args.lora_alpha if args.lora_alpha is not None else float(args.lora_rank),
+        built_in_lora_alpha=args.lora_alpha
+        if args.lora_alpha is not None
+        else float(args.lora_rank),
         **optional_kwargs,
     )
 
@@ -873,9 +863,17 @@ def build():
     print(f"\nStep 3 complete in {time.time() - step_start:.2f}s")
 
     return (
-        model, tokenizer, args, base_model_local_path, base_model_size_gb,
-        adapter_paths, all_discovered, adapter_token_ids,
-        start_time, new_vocab_size, original_vocab_size,
+        model,
+        tokenizer,
+        args,
+        base_model_local_path,
+        base_model_size_gb,
+        adapter_paths,
+        all_discovered,
+        adapter_token_ids,
+        start_time,
+        new_vocab_size,
+        original_vocab_size,
     )
 
 
@@ -892,7 +890,6 @@ def save_and_validate_model_artifacts(
     new_vocab_size=None,
     original_vocab_size=None,
 ):
-    
     # ------------------------------------------------------------------ #
     # Step 4: io.yaml + adapter index
     # ------------------------------------------------------------------ #
@@ -914,14 +911,13 @@ def save_and_validate_model_artifacts(
     # ------------------------------------------------------------------ #
     # Step 5: Save
     # ------------------------------------------------------------------ #
-    
+
     print("\n" + "=" * 80)
     print("STEP 5: Saving model and tokenizer")
     print("=" * 80)
     step_start = time.time()
     print(f"Output directory: {args.output}")
 
-    
     # Copy upstream auxiliary files first (generation_config, chat_template, etc.)
     print("\nCopying upstream auxiliary files...")
     _copy_upstream_auxiliary_files(base_model_local_path, args.output)
@@ -965,7 +961,7 @@ def save_and_validate_model_artifacts(
             print(f"  Size increase: +{size_increase_gb:.3f} GB (+{size_increase_pct:.1f}%)")
         else:
             print(f"  Size difference: {size_increase_gb:.3f} GB ({size_increase_pct:.1f}%)")
-    
+
     # ------------------------------------------------------------------ #
     # Final summary
     # ------------------------------------------------------------------ #
@@ -980,7 +976,7 @@ def save_and_validate_model_artifacts(
     print(f"Output location: {args.output}")
     print(f"Vocabulary size: {new_vocab_size} (+{num_added} new tokens)")
     print(f"Number of adapters: {num_adapters}")
-    print(f"\nAdapter summary:")
+    print("\nAdapter summary:")
     for i, adapter_info in enumerate(adapter_index["adapters"], 1):
         adapter_name = adapter_info["adapter_name"]
         ctrl = adapter_info["control_token"]
@@ -990,7 +986,7 @@ def save_and_validate_model_artifacts(
         if io_config:
             print(f"      Config: {io_config}")
         if adapter_info.get("built_in"):
-            print(f"      (built-in adapter)")
+            print("      (built-in adapter)")
     print(f"\nAdapter index: {args.output}/adapter_index.json")
     print(f"IO configs: {args.output}/io_configs/")
     print("\n" + "=" * 80)
@@ -1005,9 +1001,17 @@ def main():
         return result
 
     (
-        model, tokenizer, args, base_model_local_path, base_model_size_gb,
-        adapter_paths, all_discovered, adapter_token_ids,
-        start_time, new_vocab_size, original_vocab_size,
+        model,
+        tokenizer,
+        args,
+        base_model_local_path,
+        base_model_size_gb,
+        adapter_paths,
+        all_discovered,
+        adapter_token_ids,
+        start_time,
+        new_vocab_size,
+        original_vocab_size,
     ) = result
 
     save_and_validate_model_artifacts(

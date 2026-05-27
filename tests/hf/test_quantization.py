@@ -33,13 +33,16 @@ ADAPTER_TESTS = [
         "messages": [
             {"role": "user", "content": "What is photosynthesis?"},
             {"role": "assistant", "content": "Photosynthesis converts sunlight into glucose."},
-            {"role": "user", "content": (
-                "<guardian>You are a judge agent. Your role is to assess whether "
-                "the provided text meets the given criteria.\n\n"
-                "### Criteria: A factually incorrect response.\n\n"
-                "### Scoring Schema: If the last assistant's text meets the "
-                "criteria, return 'yes'; otherwise, return 'no'."
-            )},
+            {
+                "role": "user",
+                "content": (
+                    "<guardian>You are a judge agent. Your role is to assess whether "
+                    "the provided text meets the given criteria.\n\n"
+                    "### Criteria: A factually incorrect response.\n\n"
+                    "### Scoring Schema: If the last assistant's text meets the "
+                    "criteria, return 'yes'; otherwise, return 'no'."
+                ),
+            },
         ],
     },
     {
@@ -59,6 +62,7 @@ ADAPTER_TESTS = [
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _generate(model, tokenizer, messages, adapter_name=None, documents=None, max_new_tokens=30):
     """Generate greedy text from messages using the chat template."""
     kwargs = {}
@@ -74,7 +78,7 @@ def _generate(model, tokenizer, messages, adapter_name=None, documents=None, max
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
     return tokenizer.decode(
-        out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+        out[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
     ).strip()
 
 
@@ -82,12 +86,14 @@ def _generate(model, tokenizer, messages, adapter_name=None, documents=None, max
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def bnb_model():
     """Load granite-switch from HF with BitsAndBytes NF4 quantization."""
     bitsandbytes = pytest.importorskip("bitsandbytes")  # noqa: F841
-    import granite_switch.hf  # noqa: F401
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    import granite_switch.hf  # noqa: F401
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -109,8 +115,9 @@ def bnb_model():
 def quanto_model():
     """Load granite-switch from HF with Quanto INT4 quantization."""
     pytest.importorskip("optimum.quanto")
-    import granite_switch.hf  # noqa: F401
     from transformers import AutoModelForCausalLM, AutoTokenizer, QuantoConfig
+
+    import granite_switch.hf  # noqa: F401
 
     quanto_config = QuantoConfig(weights="int4")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -127,17 +134,23 @@ def quanto_model():
 # Tests: Adapter Activation
 # ---------------------------------------------------------------------------
 
+
 class TestBnBAdapterActivation:
     """BitsAndBytes NF4: adapters must activate (output differs with adapter via chat template)."""
 
-    @pytest.mark.parametrize("case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})")
+    @pytest.mark.parametrize(
+        "case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})"
+    )
     def test_adapter_activates(self, bnb_model, case):
         model, tokenizer = bnb_model
         documents = case.get("documents")
         base_out = _generate(model, tokenizer, case["messages"], documents=documents)
         adapter_out = _generate(
-            model, tokenizer, case["messages"],
-            adapter_name=case["adapter_name"], documents=documents,
+            model,
+            tokenizer,
+            case["messages"],
+            adapter_name=case["adapter_name"],
+            documents=documents,
         )
         assert base_out != adapter_out, (
             f"Adapter {case['adapter_name']} did not activate under BnB NF4.\n"
@@ -149,14 +162,19 @@ class TestBnBAdapterActivation:
 class TestQuantoAdapterActivation:
     """Quanto INT4: adapters must activate (output differs with adapter via chat template)."""
 
-    @pytest.mark.parametrize("case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})")
+    @pytest.mark.parametrize(
+        "case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})"
+    )
     def test_adapter_activates(self, quanto_model, case):
         model, tokenizer = quanto_model
         documents = case.get("documents")
         base_out = _generate(model, tokenizer, case["messages"], documents=documents)
         adapter_out = _generate(
-            model, tokenizer, case["messages"],
-            adapter_name=case["adapter_name"], documents=documents,
+            model,
+            tokenizer,
+            case["messages"],
+            adapter_name=case["adapter_name"],
+            documents=documents,
         )
         assert base_out != adapter_out, (
             f"Adapter {case['adapter_name']} did not activate under Quanto INT4.\n"
@@ -168,6 +186,7 @@ class TestQuantoAdapterActivation:
 # ---------------------------------------------------------------------------
 # Tests: LoRA Weight Precision
 # ---------------------------------------------------------------------------
+
 
 class TestBnBLoRAPrecision:
     """BitsAndBytes NF4: LoRA weights must remain in full precision."""
@@ -181,7 +200,7 @@ class TestBnBLoRAPrecision:
                 if param.dtype not in full_precision_dtypes:
                     bad_params.append(f"{name}: {param.dtype}")
         assert not bad_params, (
-            f"LoRA params quantized under BnB (should stay full precision):\n"
+            "LoRA params quantized under BnB (should stay full precision):\n"
             + "\n".join(bad_params[:10])
         )
 
@@ -198,7 +217,7 @@ class TestQuantoLoRAPrecision:
                 if param.dtype not in full_precision_dtypes:
                     bad_params.append(f"{name}: {param.dtype}")
         assert not bad_params, (
-            f"LoRA params quantized under Quanto (should stay full precision):\n"
+            "LoRA params quantized under Quanto (should stay full precision):\n"
             + "\n".join(bad_params[:10])
         )
 
@@ -207,18 +226,17 @@ class TestQuantoLoRAPrecision:
 # Tests: Base Weight Quantization
 # ---------------------------------------------------------------------------
 
+
 class TestBnBBaseQuantized:
     """BitsAndBytes NF4: base linear layers must actually be quantized."""
 
     def test_base_layers_are_4bit(self, bnb_model):
         model, _ = bnb_model
         quantized_count = 0
-        for name, module in model.named_modules():
+        for _name, module in model.named_modules():
             if "Linear4bit" in type(module).__name__:
                 quantized_count += 1
-        assert quantized_count > 0, (
-            "No Linear4bit modules found — BnB quantization did not apply."
-        )
+        assert quantized_count > 0, "No Linear4bit modules found — BnB quantization did not apply."
         print(f"\n  BnB: {quantized_count} layers quantized to 4-bit")
 
 
@@ -228,15 +246,15 @@ class TestQuantoBaseQuantized:
     def test_base_layers_are_quantized(self, quanto_model):
         model, _ = quanto_model
         quantized_count = 0
-        for name, module in model.named_modules():
+        for _name, module in model.named_modules():
             module_type = type(module).__name__
             if "QLinear" in module_type or "Quantized" in module_type:
                 quantized_count += 1
             elif hasattr(module, "weight") and hasattr(module.weight, "qtype"):
                 quantized_count += 1
-        assert quantized_count > 0, (
-            "No quantized modules/weights found — Quanto quantization did not apply."
-        )
+        assert (
+            quantized_count > 0
+        ), "No quantized modules/weights found — Quanto quantization did not apply."
         print(f"\n  Quanto: {quantized_count} layers quantized")
 
 
@@ -244,12 +262,14 @@ class TestQuantoBaseQuantized:
 # FP8 Tests (Quanto float8 — dequantizes to BF16 at compute time)
 # ===========================================================================
 
+
 @pytest.fixture(scope="module")
 def fp8_model():
     """Load granite-switch from HF with Quanto FP8 quantization."""
     pytest.importorskip("optimum.quanto")
-    import granite_switch.hf  # noqa: F401
     from transformers import AutoModelForCausalLM, AutoTokenizer, QuantoConfig
+
+    import granite_switch.hf  # noqa: F401
 
     quanto_config = QuantoConfig(weights="float8")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -265,14 +285,19 @@ def fp8_model():
 class TestFP8AdapterActivation:
     """FP8 (Quanto float8): adapters must activate."""
 
-    @pytest.mark.parametrize("case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})")
+    @pytest.mark.parametrize(
+        "case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})"
+    )
     def test_adapter_activates(self, fp8_model, case):
         model, tokenizer = fp8_model
         documents = case.get("documents")
         base_out = _generate(model, tokenizer, case["messages"], documents=documents)
         adapter_out = _generate(
-            model, tokenizer, case["messages"],
-            adapter_name=case["adapter_name"], documents=documents,
+            model,
+            tokenizer,
+            case["messages"],
+            adapter_name=case["adapter_name"],
+            documents=documents,
         )
         assert base_out != adapter_out, (
             f"Adapter {case['adapter_name']} did not activate under FP8.\n"
@@ -293,7 +318,7 @@ class TestFP8LoRAPrecision:
                 if param.dtype not in full_precision_dtypes:
                     bad_params.append(f"{name}: {param.dtype}")
         assert not bad_params, (
-            f"LoRA params quantized under FP8 (should stay full precision):\n"
+            "LoRA params quantized under FP8 (should stay full precision):\n"
             + "\n".join(bad_params[:10])
         )
 
@@ -304,15 +329,15 @@ class TestFP8BaseQuantized:
     def test_base_layers_are_quantized(self, fp8_model):
         model, _ = fp8_model
         quantized_count = 0
-        for name, module in model.named_modules():
+        for _name, module in model.named_modules():
             module_type = type(module).__name__
             if "QLinear" in module_type or "Quantized" in module_type:
                 quantized_count += 1
             elif hasattr(module, "weight") and hasattr(module.weight, "qtype"):
                 quantized_count += 1
-        assert quantized_count > 0, (
-            "No quantized modules/weights found — FP8 quantization did not apply."
-        )
+        assert (
+            quantized_count > 0
+        ), "No quantized modules/weights found — FP8 quantization did not apply."
         print(f"\n  FP8: {quantized_count} layers quantized")
 
 
@@ -320,12 +345,14 @@ class TestFP8BaseQuantized:
 # FP4 Tests (BnB fp4 — dequantizes to BF16 at compute time)
 # ===========================================================================
 
+
 @pytest.fixture(scope="module")
 def fp4_model():
     """Load granite-switch from HF with BitsAndBytes FP4 quantization."""
     bitsandbytes = pytest.importorskip("bitsandbytes")  # noqa: F841
-    import granite_switch.hf  # noqa: F401
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    import granite_switch.hf  # noqa: F401
 
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -346,14 +373,19 @@ def fp4_model():
 class TestFP4AdapterActivation:
     """FP4 (BnB fp4): adapters must activate."""
 
-    @pytest.mark.parametrize("case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})")
+    @pytest.mark.parametrize(
+        "case", ADAPTER_TESTS, ids=lambda c: f"{c['adapter_name']}({c['type']})"
+    )
     def test_adapter_activates(self, fp4_model, case):
         model, tokenizer = fp4_model
         documents = case.get("documents")
         base_out = _generate(model, tokenizer, case["messages"], documents=documents)
         adapter_out = _generate(
-            model, tokenizer, case["messages"],
-            adapter_name=case["adapter_name"], documents=documents,
+            model,
+            tokenizer,
+            case["messages"],
+            adapter_name=case["adapter_name"],
+            documents=documents,
         )
         assert base_out != adapter_out, (
             f"Adapter {case['adapter_name']} did not activate under FP4.\n"
@@ -374,7 +406,7 @@ class TestFP4LoRAPrecision:
                 if param.dtype not in full_precision_dtypes:
                     bad_params.append(f"{name}: {param.dtype}")
         assert not bad_params, (
-            f"LoRA params quantized under FP4 (should stay full precision):\n"
+            "LoRA params quantized under FP4 (should stay full precision):\n"
             + "\n".join(bad_params[:10])
         )
 
@@ -385,10 +417,8 @@ class TestFP4BaseQuantized:
     def test_base_layers_are_4bit(self, fp4_model):
         model, _ = fp4_model
         quantized_count = 0
-        for name, module in model.named_modules():
+        for _name, module in model.named_modules():
             if "Linear4bit" in type(module).__name__:
                 quantized_count += 1
-        assert quantized_count > 0, (
-            "No Linear4bit modules found — FP4 quantization did not apply."
-        )
+        assert quantized_count > 0, "No Linear4bit modules found — FP4 quantization did not apply."
         print(f"\n  FP4: {quantized_count} layers quantized to 4-bit")

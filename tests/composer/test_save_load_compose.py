@@ -20,20 +20,19 @@ Requires base model + RAG adapters download.  Marked slow + requires_model.
 
 import filecmp
 import gc
+import json
+import random
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import json
 import pytest
 import torch
-import random
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import granite_switch.hf  # noqa: F401 — registers AutoModel
 
 SEED = 42
-
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -48,6 +47,7 @@ EXPECTED_ONLY_IN_DIR_1 = {
     "vocab.json",
     "special_tokens_map.json",
 }
+
 
 def _is_expected_pipeline_file(rel_path: Path) -> bool:
     """Return True if rel_path is a known pipeline-only file/dir."""
@@ -66,8 +66,9 @@ def _is_expected_pipeline_file(rel_path: Path) -> bool:
 
 EXCLUDE_FROM_BINARY_COMPARE = {
     "special_tokens_map.json",  # JSON key ordering may differ between save methods
-    "io_configs/",              # pipeline-only dir; explicit for clarity
+    "io_configs/",  # pipeline-only dir; explicit for clarity
 }
+
 
 def _is_excluded_from_binary_compare(rel_path: Path) -> bool:
     """Return True if rel_path should be skipped during binary comparison."""
@@ -81,6 +82,7 @@ def _is_excluded_from_binary_compare(rel_path: Path) -> bool:
                 return True
     return False
 
+
 def _forward_logits(model, input_ids):
     """Run forward pass and return logits on CPU."""
     with torch.no_grad():
@@ -93,8 +95,10 @@ def _call_build(output_dir, extra_args=None):
 
     fake_argv = [
         "compose_granite_switch",
-        "--adapters", "ibm-granite/granite-lib-rag-r1.0",
-        "--output", str(output_dir),
+        "--adapters",
+        "ibm-granite/granite-lib-rag-r1.0",
+        "--output",
+        str(output_dir),
     ]
     if extra_args:
         fake_argv.extend(extra_args)
@@ -109,9 +113,17 @@ def _call_save(build_result):
     )
 
     (
-        model, tokenizer, args, base_model_local_path, base_model_size_gb,
-        adapter_paths, all_discovered, adapter_token_ids,
-        start_time, new_vocab_size, original_vocab_size,
+        model,
+        tokenizer,
+        args,
+        base_model_local_path,
+        base_model_size_gb,
+        adapter_paths,
+        all_discovered,
+        adapter_token_ids,
+        start_time,
+        new_vocab_size,
+        original_vocab_size,
     ) = build_result
 
     save_and_validate_model_artifacts(
@@ -151,6 +163,7 @@ def _make_inputs(tokenizer, adapter_token_id):
 
     return base_input, adapter_input
 
+
 # ── Golden Set: structured collection of test strings covering edge cases ──
 # Each entry stresses a different aspect of the tokenizer's behavior.
 # When a regression is found in the wild, ADD a new entry here — the suite
@@ -166,19 +179,21 @@ def _make_golden_set(adapter_name: str) -> list[str]:
         # Adapter control token (atomic tokenization)
         f"{control}What is the capital of France?",
         # Whitespace edge cases
-        "hello   world",                  # multiple internal spaces
-        "   leading whitespace",          # leading spaces
-        "trailing whitespace   ",         # trailing spaces
-        "line1\nline2",                   # newline
-        "with\ttab",                      # tab
+        "hello   world",  # multiple internal spaces
+        "   leading whitespace",  # leading spaces
+        "trailing whitespace   ",  # trailing spaces
+        "line1\nline2",  # newline
+        "with\ttab",  # tab
         # Adapter token with surrounding whitespace variations
-        f"prefix {control} suffix",       # spaces around
-        f"prefix{control}suffix",         # no spaces (lstrip/rstrip behavior)
+        f"prefix {control} suffix",  # spaces around
+        f"prefix{control}suffix",  # no spaces (lstrip/rstrip behavior)
         # Long-ish text
         "word " * 50,
         # Unicode (accents and non-Latin scripts)
         "café résumé naïve",
     ]
+
+
 # ════════════════════════════════════════════════════════════════════
 # Phase 1 fixture: build() → save → load
 # ════════════════════════════════════════════════════════════════════
@@ -196,9 +211,17 @@ def phase1(tmp_path_factory):
     # ── build() ──
     build_result = _call_build(save_dir)
     (
-        model, tokenizer, args, base_model_local_path, base_model_size_gb,
-        adapter_paths, all_discovered, adapter_token_ids,
-        start_time, new_vocab_size, original_vocab_size,
+        model,
+        tokenizer,
+        args,
+        base_model_local_path,
+        base_model_size_gb,
+        adapter_paths,
+        all_discovered,
+        adapter_token_ids,
+        start_time,
+        new_vocab_size,
+        original_vocab_size,
     ) = build_result
 
     model.eval()
@@ -213,8 +236,7 @@ def phase1(tmp_path_factory):
     # Capture built tokenizer info
     built_tokenizer_len = len(tokenizer)
     built_tokenizer_ids = {
-        tok: tokenizer.convert_tokens_to_ids(tok)
-        for tok in tokenizer.all_special_tokens
+        tok: tokenizer.convert_tokens_to_ids(tok) for tok in tokenizer.all_special_tokens
     }
     # Encode/decode roundtrip sample
     test_text = "The Eiffel Tower was built in 1889."
@@ -223,17 +245,13 @@ def phase1(tmp_path_factory):
 
     # Golden Set encoding (structured edge-case suite)
     golden_strings = _make_golden_set(list(built_config.adapter_names)[0])
-    built_golden_encoded = [
-        tokenizer.encode(s, add_special_tokens=False) for s in golden_strings
-    ]
+    built_golden_encoded = [tokenizer.encode(s, add_special_tokens=False) for s in golden_strings]
 
     rng = random.Random(SEED)
     sample_size = min(100, original_vocab_size)
     sample_ids = rng.sample(range(original_vocab_size), sample_size)
-    built_base_vocab_sample = {
-        tid: tokenizer.convert_ids_to_tokens(tid) for tid in sample_ids
-    }
-    built_added_vocab = dict(tokenizer.get_added_vocab()) 
+    built_base_vocab_sample = {tid: tokenizer.convert_ids_to_tokens(tid) for tid in sample_ids}
+    built_added_vocab = dict(tokenizer.get_added_vocab())
 
     # ── save ──
     _call_save(build_result)
@@ -243,7 +261,8 @@ def phase1(tmp_path_factory):
 
     # ── load ──
     loaded = AutoModelForCausalLM.from_pretrained(
-        save_dir, torch_dtype=dtype,
+        save_dir,
+        torch_dtype=dtype,
     ).eval()
     loaded.model.rotary_emb.to(torch.bfloat16)
     loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
@@ -289,13 +308,12 @@ def phase1(tmp_path_factory):
         "loaded_decoded": loaded_decoded,
         "adapter_token_ids": adapter_token_ids,
         "adapter_names": list(built_config.adapter_names),
-        "original_vocab_size": original_vocab_size,        
-        "built_base_vocab_sample": built_base_vocab_sample,   
-        "built_added_vocab": built_added_vocab,   
+        "original_vocab_size": original_vocab_size,
+        "built_base_vocab_sample": built_base_vocab_sample,
+        "built_added_vocab": built_added_vocab,
         "golden_strings": golden_strings,
         "built_golden_encoded": built_golden_encoded,
         "loaded_golden_encoded": loaded_golden_encoded,
-
     }
 
 
@@ -320,7 +338,8 @@ def phase2(tmp_path_factory):
 
     # ── First load ──
     loaded_1 = AutoModelForCausalLM.from_pretrained(
-        save_dir_1, torch_dtype=torch.bfloat16,
+        save_dir_1,
+        torch_dtype=torch.bfloat16,
     ).eval()
     loaded_1.model.rotary_emb.to(torch.bfloat16)
     tokenizer_1 = AutoTokenizer.from_pretrained(save_dir_1)
@@ -337,16 +356,12 @@ def phase2(tmp_path_factory):
     tok1_len = len(tokenizer_1)
     tok1_encoded = tokenizer_1.encode(test_text, add_special_tokens=False)
     tok1_control_ids = {
-        tok: tokenizer_1.convert_tokens_to_ids(tok)
-        for tok in tokenizer_1.all_special_tokens
+        tok: tokenizer_1.convert_tokens_to_ids(tok) for tok in tokenizer_1.all_special_tokens
     }
-    
+
     adapter_name_for_golden = loaded_1.config.adapter_names[0]
     golden_strings = _make_golden_set(adapter_name_for_golden)
-    tok1_golden_encoded = [
-        tokenizer_1.encode(s, add_special_tokens=False)
-        for s in golden_strings
-    ]    
+    tok1_golden_encoded = [tokenizer_1.encode(s, add_special_tokens=False) for s in golden_strings]
 
     # ── Second save ──
     save_dir_2 = str(tmp_path_factory.mktemp("phase2b") / "model")
@@ -357,7 +372,8 @@ def phase2(tmp_path_factory):
 
     # ── Second load ──
     loaded_2 = AutoModelForCausalLM.from_pretrained(
-        save_dir_2, torch_dtype=torch.bfloat16,
+        save_dir_2,
+        torch_dtype=torch.bfloat16,
     ).eval()
     loaded_2.model.rotary_emb.to(torch.bfloat16)
     tokenizer_2 = AutoTokenizer.from_pretrained(save_dir_2)
@@ -371,13 +387,10 @@ def phase2(tmp_path_factory):
     tok2_len = len(tokenizer_2)
     tok2_encoded = tokenizer_2.encode(test_text, add_special_tokens=False)
     tok2_control_ids = {
-        tok: tokenizer_2.convert_tokens_to_ids(tok)
-        for tok in tokenizer_2.all_special_tokens
+        tok: tokenizer_2.convert_tokens_to_ids(tok) for tok in tokenizer_2.all_special_tokens
     }
 
-    tok2_golden_encoded = [
-        tokenizer_2.encode(s, add_special_tokens=False) for s in golden_strings
-    ]
+    tok2_golden_encoded = [tokenizer_2.encode(s, add_special_tokens=False) for s in golden_strings]
 
     del loaded_2
     gc.collect()
@@ -425,9 +438,9 @@ class TestPhase1_BuildSaveLoad:
         mean_diff = diff.mean().item()
         print(f"\n  Phase 1 base mode: max={max_diff:.2e}, mean={mean_diff:.2e}")
 
-        assert torch.equal(built, loaded), (
-            f"Base mode logits NOT bit-exact. max={max_diff:.2e}, mean={mean_diff:.2e}"
-        )
+        assert torch.equal(
+            built, loaded
+        ), f"Base mode logits NOT bit-exact. max={max_diff:.2e}, mean={mean_diff:.2e}"
 
     def test_inference_adapter_mode_exact(self, phase1):
         """Adapter mode logits: built must equal loaded (bit-exact)."""
@@ -439,9 +452,9 @@ class TestPhase1_BuildSaveLoad:
         mean_diff = diff.mean().item()
         print(f"\n  Phase 1 adapter mode: max={max_diff:.2e}, mean={mean_diff:.2e}")
 
-        assert torch.equal(built, loaded), (
-            f"Adapter mode logits NOT bit-exact. max={max_diff:.2e}, mean={mean_diff:.2e}"
-        )
+        assert torch.equal(
+            built, loaded
+        ), f"Adapter mode logits NOT bit-exact. max={max_diff:.2e}, mean={mean_diff:.2e}"
 
     # ── Config ──
 
@@ -487,10 +500,10 @@ class TestPhase1_BuildSaveLoad:
         missing = [name for name in required if not (save_dir / name).exists()]
         assert not missing, f"Pipeline did not generate: {missing}"
         # Upstream README.md must NOT be present — it's replaced by BUILD.md.
-        assert not (save_dir / "README.md").exists(), (
-            "Upstream README.md should not be copied into the composed output"
-        )
-        
+        assert not (
+            save_dir / "README.md"
+        ).exists(), "Upstream README.md should not be copied into the composed output"
+
     def test_config_adapter_identity(self, phase1):
         """num_adapters, token IDs, names, substitute IDs survive save→load."""
         built = phase1["built_config"]
@@ -560,7 +573,7 @@ class TestPhase1_BuildSaveLoad:
             for k in built_sd
             if k in loaded_sd and built_sd[k].shape != loaded_sd[k].shape
         ]
-        assert not mismatched, f"Shape mismatches:\n" + "\n".join(f"  {m}" for m in mismatched)
+        assert not mismatched, "Shape mismatches:\n" + "\n".join(f"  {m}" for m in mismatched)
 
     def test_weights_values_match(self, phase1):
         """Every tensor is bit-exact identical before and after."""
@@ -573,9 +586,8 @@ class TestPhase1_BuildSaveLoad:
                 diff = (built_sd[key].float() - loaded_sd[key].float()).abs().max().item()
                 mismatched.append(f"{key}: max_diff={diff:.2e}")
 
-        assert not mismatched, (
-            f"{len(mismatched)} tensor(s) differ:\n"
-            + "\n".join(f"  {m}" for m in mismatched[:10])
+        assert not mismatched, f"{len(mismatched)} tensor(s) differ:\n" + "\n".join(
+            f"  {m}" for m in mismatched[:10]
         )
 
     # ── Tokenizer ──
@@ -594,7 +606,9 @@ class TestPhase1_BuildSaveLoad:
         """Same text encodes to same token IDs after save→load."""
         built_enc = phase1["built_encoded"]
         loaded_enc = phase1["loaded_encoded"]
-        print(f"\n  built encoded: {len(built_enc)} tokens, loaded encoded: {len(loaded_enc)} tokens")
+        print(
+            f"\n  built encoded: {len(built_enc)} tokens, loaded encoded: {len(loaded_enc)} tokens"
+        )
 
         assert loaded_enc == built_enc, (
             f"Encoded IDs differ ({len(built_enc)} vs {len(loaded_enc)} tokens):\n"
@@ -622,9 +636,10 @@ class TestPhase1_BuildSaveLoad:
             print(f"    {name}: {act_tok}={act_actual} (expect {act_expected}) [{status}]")
 
             assert act_tok in loaded_ids, f"Missing control token: {act_tok}"
-            assert loaded_ids[act_tok] == act_expected, (
-                f"{act_tok}: expected {act_expected}, got {act_actual}"
-            )
+            assert (
+                loaded_ids[act_tok] == act_expected
+            ), f"{act_tok}: expected {act_expected}, got {act_actual}"
+
     def test_added_tokens_in_added_vocab(self, phase1):
         """Every adapter control token must be registered in tokenizer.get_added_vocab().
 
@@ -671,7 +686,7 @@ class TestPhase1_BuildSaveLoad:
         (captured pre-save) and in the loaded tokenizer (reloaded from disk).
         """
         save_dir = phase1["save_dir"]
-        built_sample = phase1["built_base_vocab_sample"]   # {id: token_str}
+        built_sample = phase1["built_base_vocab_sample"]  # {id: token_str}
         original_vocab_size = phase1["original_vocab_size"]
 
         loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
@@ -690,8 +705,7 @@ class TestPhase1_BuildSaveLoad:
         assert not mismatches, (
             f"Base vocab shifted at {len(mismatches)} of {len(built_sample)} "
             f"sampled positions. First 5 mismatches "
-            f"(id, built_token, loaded_token):\n"
-            + "\n".join(f"  {m}" for m in mismatches[:5])
+            f"(id, built_token, loaded_token):\n" + "\n".join(f"  {m}" for m in mismatches[:5])
         )
 
     def test_added_token_id_mapping_consistency(self, phase1):
@@ -702,7 +716,7 @@ class TestPhase1_BuildSaveLoad:
         other special tokens the pipeline registers — beyond just the adapters.
         """
         save_dir = phase1["save_dir"]
-        built_added = phase1["built_added_vocab"]   # {token_str: id} — needs fixture support
+        built_added = phase1["built_added_vocab"]  # {token_str: id} — needs fixture support
 
         loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
         loaded_added = loaded_tokenizer.get_added_vocab()
@@ -742,15 +756,15 @@ class TestPhase1_BuildSaveLoad:
         print(f"\n  Golden Set: {len(strings)} test strings")
 
         mismatches = []
-        for s, b, l in zip(strings, built, loaded):
-            if b != l:
-                mismatches.append((s, b, l))
+        for s, b, lo in zip(strings, built, loaded, strict=False):
+            if b != lo:
+                mismatches.append((s, b, lo))
 
         if mismatches:
-            for s, b, l in mismatches:
+            for s, b, lo in mismatches:
                 print(f"  MISMATCH on {s!r}:")
                 print(f"    built:  {b}")
-                print(f"    loaded: {l}")
+                print(f"    loaded: {lo}")
 
         assert not mismatches, (
             f"Golden set: {len(mismatches)} of {len(strings)} entries differ. "
@@ -787,14 +801,13 @@ class TestPhase1_BuildSaveLoad:
 
             if not is_atomic:
                 sub_tokens = loaded_tokenizer.convert_ids_to_tokens(encoded)
-                non_atomic.append(
-                    f"{control_token} → {len(encoded)} tokens: {sub_tokens}"
-                )
+                non_atomic.append(f"{control_token} → {len(encoded)} tokens: {sub_tokens}")
 
         assert not non_atomic, (
             f"{len(non_atomic)} control token(s) were not encoded atomically:\n  "
             + "\n  ".join(non_atomic)
         )
+
 
 # ════════════════════════════════════════════════════════════════════
 # Phase 2: load → save → load (double serialization)
@@ -851,9 +864,9 @@ class TestPhase2_DoubleSerialization:
         sd1 = phase2["state_dict_1"]
         sd2 = phase2["state_dict_2"]
 
-        assert set(sd1.keys()) == set(sd2.keys()), (
-            f"Key mismatch. Missing: {set(sd1.keys()) - set(sd2.keys())}"
-        )
+        assert set(sd1.keys()) == set(
+            sd2.keys()
+        ), f"Key mismatch. Missing: {set(sd1.keys()) - set(sd2.keys())}"
 
         mismatched = []
         for key in sd1:
@@ -861,13 +874,12 @@ class TestPhase2_DoubleSerialization:
                 diff = (sd1[key].float() - sd2[key].float()).abs().max().item()
                 mismatched.append(f"{key}: max_diff={diff:.2e}")
 
-        assert not mismatched, (
-            f"{len(mismatched)} tensor(s) differ:\n"
-            + "\n".join(f"  {m}" for m in mismatched[:10])
+        assert not mismatched, f"{len(mismatched)} tensor(s) differ:\n" + "\n".join(
+            f"  {m}" for m in mismatched[:10]
         )
 
     # ── Files ──
-    
+
     # def test_file_content_matches(self, phase2):
     #     """All shared files must be binary-identical."""
     #     dir_1 = phase2["dir_1"]
@@ -924,7 +936,9 @@ class TestPhase2_DoubleSerialization:
         # of per-file bytes. The index JSON records shard assignments and will
         # also differ when boundaries shift.
         safetensor_files = {f for f in shared_to_compare if f.name.endswith(".safetensors")}
-        shard_index_files = {f for f in shared_to_compare if f.name == "model.safetensors.index.json"}
+        shard_index_files = {
+            f for f in shared_to_compare if f.name == "model.safetensors.index.json"
+        }
         other_files = shared_to_compare - safetensor_files - shard_index_files
 
         mismatched = []
@@ -966,12 +980,12 @@ class TestPhase2_DoubleSerialization:
                     f"tensor data matches: {total_1:,} bytes"
                 )
 
-        assert not mismatched, (
-            f"{len(mismatched)} file(s) differ: "
-            + ", ".join(f"{name} ({s1} vs {s2} bytes)" for name, s1, s2 in mismatched)
+        assert not mismatched, f"{len(mismatched)} file(s) differ: " + ", ".join(
+            f"{name} ({s1} vs {s2} bytes)" for name, s1, s2 in mismatched
         )
 
         print(f"  {len(other_files)} non-tensor files compared — all binary-identical")
+
     # ── Tokenizer ──
 
     def test_tokenizer_vocab_size(self, phase2):
@@ -980,9 +994,9 @@ class TestPhase2_DoubleSerialization:
         len_2 = phase2["tok2_len"]
         print(f"\n  loaded_1 vocab: {len_1}, loaded_2 vocab: {len_2}")
         assert len_2 == len_1, (
-            f"Vocab size differs: loaded_1={len_1}, loaded_2={len_2} "
-            f"(diff={len_2 - len_1})"
+            f"Vocab size differs: loaded_1={len_1}, loaded_2={len_2} " f"(diff={len_2 - len_1})"
         )
+
     def test_file_structure_matches(self, phase2):
         """Both directories must have the same files, modulo known pipeline-only files.
 
@@ -1083,7 +1097,6 @@ class TestPhase2_DoubleSerialization:
 
         assert not mismatches, f"Control token ID mismatches: {mismatches}"
 
-
     def test_tokenizer_golden_set(self, phase2):
         """Golden Set: every string encodes identically across double serialization."""
         strings = phase2["golden_strings"]
@@ -1093,7 +1106,7 @@ class TestPhase2_DoubleSerialization:
         print(f"\n  Golden Set: {len(strings)} test strings")
 
         mismatches = []
-        for s, a, b in zip(strings, enc_1, enc_2):
+        for s, a, b in zip(strings, enc_1, enc_2, strict=False):
             if a != b:
                 mismatches.append((s, a, b))
 

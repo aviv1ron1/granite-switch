@@ -14,7 +14,6 @@ Uses the modern HuggingFace Cache API for KV caching (required for incremental d
 
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
 from transformers.cache_utils import Cache
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.models.granite.modeling_granite import eager_attention_forward
@@ -62,7 +61,8 @@ class SingleSwitch(nn.Module):
         # base-model projection_head_dim.)
         if config is not None:
             self.head_dim = getattr(
-                config, "projection_head_dim",
+                config,
+                "projection_head_dim",
                 config.hidden_size // config.num_attention_heads,
             )
         else:
@@ -97,7 +97,7 @@ class SingleSwitch(nn.Module):
             max_ctrl_id = max(ctrl_ids)
             lut_size = max(getattr(config, "vocab_size", 0), max_ctrl_id + 1)
             lut = torch.full((lut_size,), -1, dtype=torch.long)
-            for ctrl_id, sub_id in zip(ctrl_ids, sub_ids):
+            for ctrl_id, sub_id in zip(ctrl_ids, sub_ids, strict=False):
                 lut[ctrl_id] = sub_id
             self.register_buffer("control_to_substitute_lut", lut)
         else:
@@ -112,10 +112,10 @@ class SingleSwitch(nn.Module):
         self,
         input_ids: torch.Tensor,
         adapter_token_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[Cache] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: Cache | None = None,
+        cache_position: torch.LongTensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute adapter indices and rewrite control tokens via the LUT.
 
@@ -193,7 +193,7 @@ class SingleSwitch(nn.Module):
         # Call HuggingFace attention backend (same as GraniteLoRAEmbeddedAttention)
         # This gets us FlashAttention, SDPA, FlexAttention, etc. for free
         attention_interface = eager_attention_forward
-        if self.config is not None and hasattr(self.config, '_attn_implementation'):
+        if self.config is not None and hasattr(self.config, "_attn_implementation"):
             if self.config._attn_implementation != "eager":
                 attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
@@ -212,12 +212,12 @@ class SingleSwitch(nn.Module):
         # Compute adapter indices
         # ======================================================================
         # attn_output shape: [batch, seq_len, num_heads, head_dim]
-        # num_heads = 1 in this case, and we only care about 
+        # num_heads = 1 in this case, and we only care about
         # the first dimension out of those head_dim
         # Extract only first dimension (where adapter_id is stored)
         # Shape: [batch, seq_len, 1, head_dim] -> [batch, seq_len]
         attn_output = attn_output[:, :, 0, 0]  # [batch, seq_len]
- 
+
         # Round to get integer adapter indices
         adapter_indices = torch.round(attn_output).long()
 
@@ -225,9 +225,9 @@ class SingleSwitch(nn.Module):
         adapter_indices = torch.clamp(adapter_indices, 0, self.num_adapters)
 
         # Ensure output shape matches input shape
-        assert adapter_indices.shape == input_ids.shape, (
-            f"adapter_indices shape {adapter_indices.shape} must match input_ids shape {input_ids.shape}"
-        )
+        assert (
+            adapter_indices.shape == input_ids.shape
+        ), f"adapter_indices shape {adapter_indices.shape} must match input_ids shape {input_ids.shape}"
 
         # Token-exchange rewrite: replace each control token's id with its
         # substitute id via the LUT. Done here (rather than in the decoder)
@@ -239,9 +239,7 @@ class SingleSwitch(nn.Module):
         if self.control_to_substitute_lut is not None:
             sub_id_per_pos = self.control_to_substitute_lut[input_ids]
             is_control = sub_id_per_pos >= 0
-            modified_input_ids = torch.where(
-                is_control, sub_id_per_pos, input_ids
-            )
+            modified_input_ids = torch.where(is_control, sub_id_per_pos, input_ids)
         else:
             modified_input_ids = input_ids
 

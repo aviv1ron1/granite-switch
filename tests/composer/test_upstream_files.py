@@ -24,8 +24,8 @@ from pathlib import Path
 import pytest
 
 from granite_switch.composer.compose_granite_switch import (
-    _resolve_base_model_path,
     _copy_upstream_auxiliary_files,
+    _resolve_base_model_path,
 )
 
 # ---------------------------------------------------------------------------
@@ -76,9 +76,12 @@ def built_in_build_output(request, tmp_path_factory):
         sys.executable,
         "-m",
         "granite_switch.composer.compose_granite_switch",
-        "--base-model", model_id,
-        "--built-in-adapters", "base",
-        "--output", str(output_dir),
+        "--base-model",
+        model_id,
+        "--built-in-adapters",
+        "base",
+        "--output",
+        str(output_dir),
     ]
 
     result = subprocess.run(
@@ -153,9 +156,7 @@ class TestUpstreamFileCopy:
         if not upstream_template:
             pytest.skip(f"upstream model {_model_id} has no chat template")
 
-        upstream.add_special_tokens(
-            {"additional_special_tokens": ["<|__test__|>"]}
-        )
+        upstream.add_special_tokens({"additional_special_tokens": ["<|__test__|>"]})
         upstream.save_pretrained(str(tmp_path))
 
         reloaded = AutoTokenizer.from_pretrained(str(tmp_path))
@@ -173,9 +174,7 @@ class TestUpstreamFileCopy:
 
         for name in copied:
             ext = Path(name).suffix
-            assert ext not in WEIGHT_EXTENSIONS, (
-                f"Weight file '{name}' should not have been copied"
-            )
+            assert ext not in WEIGHT_EXTENSIONS, f"Weight file '{name}' should not have been copied"
 
     def test_config_json_excluded(self, resolved_model, tmp_path):
         """config.json must not be copied (replaced by GraniteSwitchConfig)."""
@@ -189,9 +188,7 @@ class TestUpstreamFileCopy:
         copied = _copy_upstream_auxiliary_files(local_path, str(tmp_path))
 
         for name in copied:
-            assert not name.startswith("."), (
-                f"Dotfile '{name}' should not have been copied"
-            )
+            assert not name.startswith("."), f"Dotfile '{name}' should not have been copied"
 
     def test_no_unexpected_files(self, resolved_model, tmp_path):
         """Every copied file must exist in the source directory."""
@@ -200,12 +197,10 @@ class TestUpstreamFileCopy:
         copied = _copy_upstream_auxiliary_files(local_path, str(tmp_path))
 
         for name in copied:
-            assert (src / name).exists(), (
-                f"Copied file '{name}' not found in source {local_path}"
-            )
-            assert (tmp_path / name).exists(), (
-                f"Copied file '{name}' not found in output {tmp_path}"
-            )
+            assert (src / name).exists(), f"Copied file '{name}' not found in source {local_path}"
+            assert (
+                tmp_path / name
+            ).exists(), f"Copied file '{name}' not found in output {tmp_path}"
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +264,7 @@ class TestBuiltInBuildE2E:
         config = json.loads((output_dir / "config.json").read_text())
         for token_id in config["adapter_token_ids"]:
             token = tokenizer.convert_ids_to_tokens(token_id)
-            assert token is not None, (
-                f"Adapter token ID {token_id} not in tokenizer vocabulary"
-            )
+            assert token is not None, f"Adapter token ID {token_id} not in tokenizer vocabulary"
 
     def test_chat_template_enriched(self, built_in_build_output):
         """Granite chat template should be enriched with adapter mappings."""
@@ -288,9 +281,9 @@ class TestBuiltInBuildE2E:
         output_template = output_tokenizer.chat_template
 
         assert output_template, "Output tokenizer has no chat template"
-        assert "adapter_map" in output_template, (
-            "Granite output template missing adapter_map mapping"
-        )
-        assert "adapter_token" in output_template, (
-            "Granite output template missing adapter_token lookup logic"
-        )
+        assert (
+            "adapter_map" in output_template
+        ), "Granite output template missing adapter_map mapping"
+        assert (
+            "adapter_token" in output_template
+        ), "Granite output template missing adapter_token lookup logic"

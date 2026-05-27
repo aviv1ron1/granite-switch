@@ -5,8 +5,8 @@ import pytest
 import torch
 import torch.nn as nn
 
+from granite_switch.composer.arch import ArchDescriptor, ModuleDescriptor
 from granite_switch.composer.validator import validate_all_parameters
-from granite_switch.composer.arch import ModuleDescriptor, ArchDescriptor
 
 
 @pytest.fixture
@@ -165,10 +165,7 @@ class TestValidateAllParameters:
                 super().__init__()
                 self.weight = nn.Parameter(torch.randn(10, 10))
                 # These should be skipped
-                self.register_parameter(
-                    "adapter_token_ids_param",
-                    nn.Parameter(torch.zeros(4))
-                )
+                self.register_parameter("adapter_token_ids_param", nn.Parameter(torch.zeros(4)))
 
             def named_parameters(self, **kwargs):
                 yield "weight", self.weight

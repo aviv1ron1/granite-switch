@@ -68,6 +68,7 @@ basic_overrides = single_overrides
 
 # ── Model builder ─────────────────────────────────────────────────
 
+
 def save_switch_model(base_cfg, cfg_overrides, tmpdir):
     """Build a GraniteSwitch model from config and save to disk.
 

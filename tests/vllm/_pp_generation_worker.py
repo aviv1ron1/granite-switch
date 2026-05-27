@@ -13,19 +13,17 @@ import sys
 import traceback
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import torch
+import torch  # noqa: E402
 
-from tests.shared.generation_models import (
+from tests.shared.generation_models import (  # noqa: E402
     DENSE_CFG,
-    single_overrides,
     save_switch_model,
+    single_overrides,
 )
-
 
 DECODER_LAYERS = 40
 CONTROL_TOKEN_ID = 250
@@ -59,6 +57,7 @@ def run_pp_generation(tmpdir):
 
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
+
     from granite_switch.vllm import register as register_granite_switch
 
     register_granite_switch()
@@ -98,9 +97,7 @@ def run_pp_generation(tmpdir):
     _log("generate_done")
     generated = outputs[0].outputs[0].token_ids
 
-    assert len(generated) == 4, (
-        f"Expected 4 generated tokens, got {len(generated)}"
-    )
+    assert len(generated) == 4, f"Expected 4 generated tokens, got {len(generated)}"
 
     _log("cleanup_start")
     del llm

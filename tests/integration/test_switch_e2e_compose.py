@@ -30,8 +30,8 @@ CI must opt in explicitly: `pytest -m "slow and requires_model and gpu"`.
 
 import json
 import os
-import pytest
 
+import pytest
 
 pytestmark = [pytest.mark.slow, pytest.mark.requires_model, pytest.mark.gpu]
 
@@ -48,7 +48,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.requires_model, pytest.mark.gpu]
 # the flavor matching `--base-model`.
 _DEFAULT_BASE_MODEL_PAIRS = [
     ("ibm-granite/granite-4.0-micro", "ibm-granite/granitelib-core-r1.0"),
-    ("ibm-granite/granite-4.1-3b",    "ibm-granite/granitelib-core-r1.0"),
+    ("ibm-granite/granite-4.1-3b", "ibm-granite/granitelib-core-r1.0"),
 ]
 
 
@@ -79,8 +79,8 @@ def _load_experimental_pairs():
     except json.JSONDecodeError as e:
         raise ValueError(
             f"GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS is not valid JSON: {e}\n"
-            f"Expected format: '[{{\"base\":\"/path\",\"adapter\":\"/path\"}}, ...]'"
-        )
+            f'Expected format: \'[{{"base":"/path","adapter":"/path"}}, ...]\''
+        ) from e
     return [(p["base"], p["adapter"]) for p in entries]
 
 
@@ -316,7 +316,9 @@ def test_hf_vllm_argmax_equivalence(composed_model_artifacts):
     """
     import gc
     import os
+
     import torch
+
     from tests.shared.vllm_equivalence import extract_logprobs_tensor
 
     save_dir = composed_model_artifacts["save_dir"]
@@ -394,8 +396,11 @@ def test_hf_vllm_argmax_equivalence(composed_model_artifacts):
         _baseline_argmax_hf = _hf_baseline_logprobs.argmax(dim=-1)
         _baseline_argmax_vllm = _baseline_vllm.argmax(dim=-1)
         _baseline_mismatches = (
-            _baseline_argmax_hf != _baseline_argmax_vllm
-        ).nonzero(as_tuple=False).flatten().tolist()
+            (_baseline_argmax_hf != _baseline_argmax_vllm)
+            .nonzero(as_tuple=False)
+            .flatten()
+            .tolist()
+        )
         print(
             f"\n  [baseline-no-ctrl] argmax mismatch positions: {_baseline_mismatches}"
             f"\n    HF  : {_baseline_argmax_hf.tolist()}"
@@ -431,15 +436,20 @@ def test_hf_vllm_argmax_equivalence(composed_model_artifacts):
 
             hf_argmax = hf_logprobs_aligned.argmax(dim=-1)
             vllm_argmax = vllm_logprobs.argmax(dim=-1)
-            mismatches = (hf_argmax != vllm_argmax).nonzero(
-                as_tuple=False,
-            ).flatten().tolist()
+            mismatches = (
+                (hf_argmax != vllm_argmax)
+                .nonzero(
+                    as_tuple=False,
+                )
+                .flatten()
+                .tolist()
+            )
 
-            pre_ctrl  = [i for i in mismatches if i < ctrl_pos]
+            pre_ctrl = [i for i in mismatches if i < ctrl_pos]
             post_ctrl = [i for i in mismatches if i >= ctrl_pos]
-            hf_top2   = torch.topk(hf_logprobs_aligned, k=2, dim=-1).values
+            hf_top2 = torch.topk(hf_logprobs_aligned, k=2, dim=-1).values
             vllm_top2 = torch.topk(vllm_logprobs, k=2, dim=-1).values
-            hf_margin   = hf_top2[:, 0] - hf_top2[:, 1]
+            hf_margin = hf_top2[:, 0] - hf_top2[:, 1]
             vllm_margin = vllm_top2[:, 0] - vllm_top2[:, 1]
             print(
                 f"  [{position_name}] mismatch split: "
@@ -453,8 +463,9 @@ def test_hf_vllm_argmax_equivalence(composed_model_artifacts):
                 )
 
             if mismatches:
-                failures.append((position_name, mismatches, hf_argmax.tolist(),
-                                 vllm_argmax.tolist()))
+                failures.append(
+                    (position_name, mismatches, hf_argmax.tolist(), vllm_argmax.tolist())
+                )
     finally:
         del llm
         gc.collect()
@@ -470,7 +481,7 @@ def test_hf_vllm_argmax_equivalence(composed_model_artifacts):
             for pos, mism, hf_a, vllm_a in failures
         )
         + "\n  This typically indicates a vLLM gain-compensation bug: the "
-          "switch\n  produced wrong adapter_indices, the wrong LoRA was "
-          "applied, and\n  the downstream logits diverged enough to flip "
-          "the top token."
+        "switch\n  produced wrong adapter_indices, the wrong LoRA was "
+        "applied, and\n  the downstream logits diverged enough to flip "
+        "the top token."
     )

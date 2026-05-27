@@ -25,10 +25,9 @@ from transformers.models.granitemoehybrid.modeling_granitemoehybrid import (
 
 from granite_switch.config import GraniteSwitchConfig
 from granite_switch.hf import GraniteSwitchForCausalLM
-
 from tests.shared.granite4_equivalence import (
-    transfer_weights_strict,
     GRANITE4_FULLSIZE,
+    transfer_weights_strict,
 )
 
 _VLLM_AVAILABLE = importlib.util.find_spec("vllm") is not None
@@ -50,16 +49,12 @@ class TestGranite4FullSizeWeightTransfer:
         cfg = GRANITE4_FULLSIZE[model_name]
 
         torch.manual_seed(0)
-        upstream = GraniteMoeHybridForCausalLM(
-            GraniteMoeHybridConfig(**cfg)
-        ).eval()
+        upstream = GraniteMoeHybridForCausalLM(GraniteMoeHybridConfig(**cfg)).eval()
         upstream_sd = upstream.state_dict()
         del upstream
         gc.collect()
 
-        switch = GraniteSwitchForCausalLM(
-            GraniteSwitchConfig(**cfg, num_adapters=0)
-        ).eval()
+        switch = GraniteSwitchForCausalLM(GraniteSwitchConfig(**cfg, num_adapters=0)).eval()
 
         transfer_weights_strict(upstream_sd, switch.state_dict())
 
@@ -74,8 +69,7 @@ _TIMEOUT = 1200
 
 
 def _run_inner_class(class_name):
-    cmd = [sys.executable, "-m", "pytest", str(_INNER),
-           "-v", "-s", "--tb=short", "-k", class_name]
+    cmd = [sys.executable, "-m", "pytest", str(_INNER), "-v", "-s", "--tb=short", "-k", class_name]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT)
     if result.stdout:
         print(result.stdout[-4000:])

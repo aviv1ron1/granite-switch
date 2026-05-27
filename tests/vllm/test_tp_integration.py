@@ -47,7 +47,10 @@ def _run_step(step_name, *cmd_args, timeout=TIMEOUT):
     print(f"{'='*60}")
 
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout,
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
 
     if result.stdout:
@@ -91,9 +94,9 @@ def _compare_topk(label, prompt_idx, rec1, rec2):
     numerical tolerance. Raises AssertionError with a diagnostic message."""
     topk1 = rec1["first_token_topk"]
     topk2 = rec2["first_token_topk"]
-    assert topk1 is not None and topk2 is not None, (
-        f"[{label}] Prompt {prompt_idx}: missing first_token_topk in output"
-    )
+    assert (
+        topk1 is not None and topk2 is not None
+    ), f"[{label}] Prompt {prompt_idx}: missing first_token_topk in output"
 
     ids1 = [tid for tid, _ in topk1[:TOPK]]
     ids2 = [tid for tid, _ in topk2[:TOPK]]
@@ -138,13 +141,25 @@ def _build_and_compare(work_dir, build_args, label, intrinsic_name=None):
 
     _run_step(
         f"generate TP=1 ({label})",
-        "run", "--model-path", model_dir, "--tp-size", "1",
-        "--output-path", tp1_out, *run_extra,
+        "run",
+        "--model-path",
+        model_dir,
+        "--tp-size",
+        "1",
+        "--output-path",
+        tp1_out,
+        *run_extra,
     )
     _run_step(
         f"generate TP=2 ({label})",
-        "run", "--model-path", model_dir, "--tp-size", "2",
-        "--output-path", tp2_out, *run_extra,
+        "run",
+        "--model-path",
+        model_dir,
+        "--tp-size",
+        "2",
+        "--output-path",
+        tp2_out,
+        *run_extra,
     )
 
     with open(tp1_out) as f:
@@ -152,13 +167,12 @@ def _build_and_compare(work_dir, build_args, label, intrinsic_name=None):
     with open(tp2_out) as f:
         records_tp2 = json.load(f)
 
-    assert len(records_tp1) == len(records_tp2), (
-        f"[{label}] prompt count differs: tp1={len(records_tp1)} tp2={len(records_tp2)}"
-    )
+    assert len(records_tp1) == len(
+        records_tp2
+    ), f"[{label}] prompt count differs: tp1={len(records_tp1)} tp2={len(records_tp2)}"
 
-    for i, (r1, r2) in enumerate(zip(records_tp1, records_tp2)):
+    for i, (r1, r2) in enumerate(zip(records_tp1, records_tp2, strict=False)):
         _compare_topk(label, i, r1, r2)
-
 
 
 class TestTPRealAdapters:
@@ -174,8 +188,10 @@ class TestTPRealAdapters:
             str(tmp_path),
             build_args=[
                 "build-compose",
-                "--base-model", "ibm-granite/granite-4.0-micro",
-                "--adapter-repos", "ibm-granite/granitelib-rag-r1.0",
+                "--base-model",
+                "ibm-granite/granite-4.0-micro",
+                "--adapter-repos",
+                "ibm-granite/granitelib-rag-r1.0",
             ],
             label="granite-4.0-micro-rag",
             intrinsic_name="answerability",

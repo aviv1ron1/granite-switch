@@ -102,6 +102,7 @@ select = [
 ignore = [
     "E501",  # line-too-long (formatter handles it; long strings/URLs are fine)
     "B008",  # function call in default arg (common in PyTorch/HF APIs)
+    "UP038", # isinstance(x, (A, B)) is fine; X | Y form requires py3.10+ at runtime
 ]
 
 [tool.ruff.format]

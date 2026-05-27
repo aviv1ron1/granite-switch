@@ -28,8 +28,7 @@ import sys
 import torch
 from transformers import AutoConfig
 
-
-FAST_LENGTHS = [64]        # Single medium-length request for quick regression checks.
+FAST_LENGTHS = [64]  # Single medium-length request for quick regression checks.
 FULL_LENGTHS = [3, 7, 16, 32, 64, 128, 192, 256]  # Thorough: short to long.
 TOP_K = 100  # Compare top-100 logprobs per position (sufficient to detect divergence).
 
@@ -59,10 +58,11 @@ def _generate_inputs(vocab_size, request_lengths):
     """Generate deterministic test inputs from model config."""
     torch.manual_seed(42)
     max_tok = min(vocab_size, 1000)
-    return [torch.randint(1, max_tok, (l,)).tolist() for l in request_lengths]
+    return [torch.randint(1, max_tok, (length,)).tolist() for length in request_lengths]
 
 
 # ── build mode ────────────────────────────────────────────────────
+
 
 def cmd_build(args):
     """Build a GraniteSwitch skin and save inputs + skin to work-dir."""
@@ -86,10 +86,11 @@ def cmd_build(args):
     print(f"  saved {len(all_ids)} input sequences to {inputs_path}")
 
     # Build skin
-    print(f"\nBuilding GraniteSwitch skin (num_adapters=0)...")
+    print("\nBuilding GraniteSwitch skin (num_adapters=0)...")
     skin_dir = os.path.join(work_dir, "skin")
     model = GraniteSwitchComposer.from_base_and_adapters(
-        model_name, torch_dtype=dtype,
+        model_name,
+        torch_dtype=dtype,
     )
     print(f"  saving skinned model to {skin_dir}...")
     model.save_pretrained(skin_dir)
@@ -100,12 +101,14 @@ def cmd_build(args):
 
 # ── run mode ──────────────────────────────────────────────────────
 
+
 def cmd_run(args):
     """Load a model in vLLM, extract logprobs, save to JSON."""
     os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
+
     from granite_switch.vllm import register as register_granite_switch
 
     register_granite_switch()
@@ -118,7 +121,6 @@ def cmd_run(args):
     with open(inputs_path) as f:
         data = json.load(f)
     all_ids = data["inputs"]
-    request_lengths = data["request_lengths"]
 
     # Resolve dtype from config.
     print(f"Loading config for {model_path}...")
@@ -156,9 +158,7 @@ def cmd_run(args):
         req_logprobs = []
         for pos_logprobs in outputs[0].prompt_logprobs[1:]:
             if pos_logprobs is not None:
-                req_logprobs.append(
-                    {str(tid): lp.logprob for tid, lp in pos_logprobs.items()}
-                )
+                req_logprobs.append({str(tid): lp.logprob for tid, lp in pos_logprobs.items()})
             else:
                 req_logprobs.append({})
         all_logprobs.append(req_logprobs)
@@ -175,6 +175,7 @@ def cmd_run(args):
 
 # ── compare mode ──────────────────────────────────────────────────
 
+
 def cmd_compare(args):
     """Load two logprob JSONs and check bit-exact match."""
     with open(args.ref) as f:
@@ -186,18 +187,20 @@ def cmd_compare(args):
     sw_all = sw_data["logprobs"]
     label = args.label
 
-    assert len(ref_all) == len(sw_all), (
-        f"{label}: request count mismatch {len(ref_all)} vs {len(sw_all)}"
-    )
+    assert len(ref_all) == len(
+        sw_all
+    ), f"{label}: request count mismatch {len(ref_all)} vs {len(sw_all)}"
 
     rc = 0
-    for i, (ref_req, sw_req) in enumerate(zip(ref_all, sw_all)):
+    for i, (ref_req, sw_req) in enumerate(zip(ref_all, sw_all, strict=False)):
         rc_i = _compare_logprobs(ref_req, sw_req, f"req[{i}]")
         rc = max(rc, rc_i)
 
     if rc == 0:
-        print(f"\nPASS: {label} — bit-exact equivalence via vLLM "
-              f"[{len(ref_all)} individual requests]")
+        print(
+            f"\nPASS: {label} — bit-exact equivalence via vLLM "
+            f"[{len(ref_all)} individual requests]"
+        )
     else:
         print(f"\nFAIL: {label} — logprobs differ via vLLM")
     return rc
@@ -208,15 +211,15 @@ def _compare_logprobs(reference, switch, label):
 
     Each input is a list of dicts (one per position), mapping str(token_id) → logprob.
     """
-    assert len(reference) == len(switch), (
-        f"{label}: length mismatch {len(reference)} vs {len(switch)}"
-    )
+    assert len(reference) == len(
+        switch
+    ), f"{label}: length mismatch {len(reference)} vs {len(switch)}"
     total_entries = 0
     mismatched_keys = 0
     mismatched_values = 0
     max_diff = 0.0
 
-    for pos, (ref_d, sw_d) in enumerate(zip(reference, switch)):
+    for _pos, (ref_d, sw_d) in enumerate(zip(reference, switch, strict=False)):
         total_entries += len(ref_d)
         if set(ref_d.keys()) != set(sw_d.keys()):
             mismatched_keys += 1
@@ -233,13 +236,16 @@ def _compare_logprobs(reference, switch, label):
         print(f"  [{label}] FAIL: {mismatched_keys} positions have different top-K token sets")
         return 1
     if mismatched_values > 0:
-        print(f"  [{label}] FAIL: {mismatched_values} logprob values differ, max |diff| = {max_diff:.6e}")
+        print(
+            f"  [{label}] FAIL: {mismatched_values} logprob values differ, max |diff| = {max_diff:.6e}"
+        )
         return 1
     print(f"  [{label}] OK: bit-exact")
     return 0
 
 
 # ── CLI ───────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -249,8 +255,9 @@ def main():
     p_build = sub.add_parser("build", help="Build skin and save inputs")
     p_build.add_argument("--model", required=True, help="HuggingFace model name or path")
     p_build.add_argument("--work-dir", required=True, help="Working directory for outputs")
-    p_build.add_argument("--fast", action="store_true",
-                         help="Single medium-length request (quick regression check)")
+    p_build.add_argument(
+        "--fast", action="store_true", help="Single medium-length request (quick regression check)"
+    )
 
     # run
     p_run = sub.add_parser("run", help="Load model in vLLM, extract logprobs")

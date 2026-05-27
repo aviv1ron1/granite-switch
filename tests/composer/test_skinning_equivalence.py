@@ -28,20 +28,19 @@ from pathlib import Path
 
 import pytest
 
-
 HF_WORKER = Path(__file__).parent / "_skinning_equivalence_worker.py"
 VLLM_WORKER = Path(__file__).parent / "_skinning_equivalence_worker_vllm.py"
-HF_TIMEOUT = 1800   # 30 min per model (download + 2× load + forward)
+HF_TIMEOUT = 1800  # 30 min per model (download + 2× load + forward)
 VLLM_TIMEOUT = 1800  # 30 min per model (download + build skin + 2× vLLM load)
 
 # Granite models for skinning equivalence tests.
 ALL_MODELS = [
-    "ibm-granite/granite-4.0-micro",        # Granite 4.x Dense (small, fast)
+    "ibm-granite/granite-4.0-micro",  # Granite 4.x Dense (small, fast)
 ]
 
 # Models tested via vLLM (requires GPU).
 VLLM_MODELS = [
-    "ibm-granite/granite-4.0-micro",        # Granite 4.x Dense (small, fast)
+    "ibm-granite/granite-4.0-micro",  # Granite 4.x Dense (small, fast)
 ]
 
 
@@ -124,35 +123,51 @@ def _run_vllm_test(model_name, timeout, fast=False):
         # 1. Build skin (CPU, no GPU needed)
         _run_step(
             "build skin",
-            "build", "--model", model_name,
-            "--work-dir", work_dir, *fast_flag,
+            "build",
+            "--model",
+            model_name,
+            "--work-dir",
+            work_dir,
+            *fast_flag,
             timeout=timeout,
         )
 
         # 2. Run original model in vLLM (GPU)
         _run_step(
             "run original",
-            "run", "--model", model_name,
-            "--inputs", inputs_json,
-            "--output", ref_json,
+            "run",
+            "--model",
+            model_name,
+            "--inputs",
+            inputs_json,
+            "--output",
+            ref_json,
             timeout=timeout,
         )
 
         # 3. Run skinned model in vLLM (GPU)
         _run_step(
             "run skin",
-            "run", "--model", skin_dir,
-            "--inputs", inputs_json,
-            "--output", sw_json,
+            "run",
+            "--model",
+            skin_dir,
+            "--inputs",
+            inputs_json,
+            "--output",
+            sw_json,
             timeout=timeout,
         )
 
         # 4. Compare logprobs (CPU)
         _run_step(
             "compare",
-            "compare", "--ref", ref_json,
-            "--switch", sw_json,
-            "--label", model_name,
+            "compare",
+            "--ref",
+            ref_json,
+            "--switch",
+            sw_json,
+            "--label",
+            model_name,
             timeout=60,
         )
 
@@ -166,6 +181,7 @@ def _run_vllm_test(model_name, timeout, fast=False):
 # achievable.  The vLLM skinning tests below are the authoritative equivalence
 # check — both sides use the same fused-projection architecture.
 
+
 @pytest.mark.skip(reason="HF backend uses fused projections (not bit-exact with upstream HF)")
 @pytest.mark.slow
 @pytest.mark.requires_model
@@ -176,6 +192,7 @@ def test_skinning_equivalence_hf(model_name):
 
 
 # ── vLLM tests: fast (single request) ────────────────────────────
+
 
 @pytest.mark.requires_model
 @pytest.mark.parametrize("model_name", VLLM_MODELS, ids=_short_name)
@@ -189,6 +206,7 @@ def test_skinning_equivalence_vllm(model_name):
 
 
 # ── vLLM tests: thorough (8 requests, varying lengths) ───────────
+
 
 @pytest.mark.slow
 @pytest.mark.requires_model

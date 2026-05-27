@@ -6,19 +6,14 @@ They are used by the Router implementation to apply frozen LoRA adapters
 selected by the trainable switch.
 """
 
-from typing import Optional, Tuple, List, Union
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.models.granitemoehybrid.modeling_granitemoehybrid import (
+    GraniteMoeHybridMLP,
     apply_rotary_pos_emb,
     eager_attention_forward,
-    repeat_kv,
-    GraniteMoeHybridMLP,
 )
 
 from granite_switch.config import GraniteSwitchConfig
@@ -79,7 +74,7 @@ class SwitchedLoRALinear(nn.Module):
 
         # Context-passing support: stored adapter_indices for use in modules
         # (like mamba) where the caller can't pass adapter_indices explicitly.
-        self._adapter_indices: Optional[torch.Tensor] = None
+        self._adapter_indices: torch.Tensor | None = None
 
     @property
     def weight(self):
@@ -91,9 +86,7 @@ class SwitchedLoRALinear(nn.Module):
         """Expose base layer bias for upstream module compatibility."""
         return self.base_layer.bias
 
-    def forward(
-        self, x: torch.Tensor, adapter_indices: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adapter_indices: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass with conditional LoRA.
 
         Args:
@@ -193,7 +186,7 @@ class MergedSwitchedLoRALinear(nn.Module):
     def __init__(
         self,
         in_features: int,
-        output_slices: Tuple[int, ...],
+        output_slices: tuple[int, ...],
         num_adapters: int,
         max_lora_rank: int,
         bias: bool = False,
@@ -217,14 +210,18 @@ class MergedSwitchedLoRALinear(nn.Module):
         # LoRA slices stored as ParameterList (MATCHES vLLM STRUCTURE!)
         # This ensures parameter names are: module.lora_A_slices.0, module.lora_A_slices.1, etc.
         # Shape: [num_adapters, 1, max_lora_rank, features]
-        self.lora_A_slices = nn.ParameterList([
-            nn.Parameter(torch.zeros(self.num_adapters, 1, self.max_lora_rank, in_features))
-            for _ in range(self.num_slices)
-        ])
-        self.lora_B_slices = nn.ParameterList([
-            nn.Parameter(torch.zeros(self.num_adapters, 1, output_size, self.max_lora_rank))
-            for output_size in output_slices
-        ])
+        self.lora_A_slices = nn.ParameterList(
+            [
+                nn.Parameter(torch.zeros(self.num_adapters, 1, self.max_lora_rank, in_features))
+                for _ in range(self.num_slices)
+            ]
+        )
+        self.lora_B_slices = nn.ParameterList(
+            [
+                nn.Parameter(torch.zeros(self.num_adapters, 1, output_size, self.max_lora_rank))
+                for output_size in output_slices
+            ]
+        )
 
         # Initialize LoRA weights
         for lora_A in self.lora_A_slices:
@@ -234,11 +231,9 @@ class MergedSwitchedLoRALinear(nn.Module):
 
         # Context-passing support: stored adapter_indices for use in modules
         # (like shared_mlp) where the caller can't pass adapter_indices explicitly.
-        self._adapter_indices: Optional[torch.Tensor] = None
+        self._adapter_indices: torch.Tensor | None = None
 
-    def forward(
-        self, x: torch.Tensor, adapter_indices: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adapter_indices: torch.Tensor | None = None) -> torch.Tensor:
         """Forward with packed LoRA applied to each slice.
 
         Args:
@@ -279,11 +274,11 @@ class MergedSwitchedLoRALinear(nn.Module):
             lora_B = self.lora_B_slices[slice_idx]  # [num_adapters, 1, output_size, rank]
 
             # Apply LoRA to this slice's output region
-            output_slice = output_flat[:, offset:offset+output_size]
+            output_slice = output_flat[:, offset : offset + output_size]
             output_slice = self._apply_lora_to_slice(
                 x_flat, output_slice, adapter_indices_flat, lora_A, lora_B
             )
-            output_flat[:, offset:offset+output_size] = output_slice
+            output_flat[:, offset : offset + output_size] = output_slice
 
             offset += output_size
 
@@ -354,7 +349,8 @@ class GraniteLoRAEmbeddedAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = getattr(
-            config, "projection_head_dim",
+            config,
+            "projection_head_dim",
             self.hidden_size // self.num_heads,
         )
         self.num_key_value_heads = config.num_key_value_heads
@@ -422,13 +418,13 @@ class GraniteLoRAEmbeddedAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         adapter_indices: torch.Tensor,
-        position_embeddings: Tuple[torch.Tensor, torch.Tensor],
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[Cache] = None,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: Cache | None = None,
         output_attentions: bool = False,
         use_cache: bool = False,
-        cache_position: Optional[torch.LongTensor] = None,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Cache]]:
+        cache_position: torch.LongTensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, Cache | None]:
         """Forward pass with LoRA and modern Cache API support.
 
         Args:
@@ -475,7 +471,9 @@ class GraniteLoRAEmbeddedAttention(nn.Module):
             # Transpose for RoPE: [batch, seq, heads, dim] -> [batch, heads, seq, dim]
             query_states_t = query_states.transpose(1, 2)
             key_states_t = key_states.transpose(1, 2)
-            query_states_t, key_states_t = apply_rotary_pos_emb(query_states_t, key_states_t, cos, sin)
+            query_states_t, key_states_t = apply_rotary_pos_emb(
+                query_states_t, key_states_t, cos, sin
+            )
             # Transpose back: [batch, heads, seq, dim] -> [batch, seq, heads, dim]
             query_states = query_states_t.transpose(1, 2)
             key_states = key_states_t.transpose(1, 2)
@@ -552,12 +550,12 @@ def replace_shared_mlp_projections_with_lora(
     if "shared_output_linear" in config.lora_target_modules:
         old = mlp.output_linear
         mlp.output_linear = SwitchedLoRALinear(
-            old.in_features, old.out_features,
-            num_adapters, max_lora_rank,
+            old.in_features,
+            old.out_features,
+            num_adapters,
+            max_lora_rank,
             bias=old.bias is not None,
         )
         has_output_lora = True
 
     return has_input_lora, has_output_lora
-
-

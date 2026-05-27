@@ -3,22 +3,17 @@
 
 from types import SimpleNamespace
 
-import pytest
-
 from granite_switch.composer.arch import (
-    ArchDescriptor,
-    ModuleDescriptor,
     _COMMON_OPTIONAL_FIELDS,
-    _GRANITE_OPTIONAL_FIELDS,
+    ModuleDescriptor,
     granite_dense_arch,
 )
 from granite_switch.composer.weight_transfer import _classify_base_weights
-from granite_switch.composer.weight_remapper import AdapterRemapper
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_granite_base_state_dict(num_layers=2):
     """Create a mock base state dict with Granite-style weight names."""
@@ -86,11 +81,9 @@ class TestBaseWeightClassificationGranite:
         _fused, direct = _classify_base_weights(base_sd, arch, lora_targets)
 
         base_name = "model.layers.0.mlp.down_proj.weight"
-        assert base_name in direct, f"down_proj not in direct mappings"
+        assert base_name in direct, "down_proj not in direct mappings"
         expected = "model.layers.0.shared_mlp.output_linear.base_layer.weight"
-        assert direct[base_name] == expected, (
-            f"Expected {expected}, got {direct[base_name]}"
-        )
+        assert direct[base_name] == expected, f"Expected {expected}, got {direct[base_name]}"
 
     def test_o_proj_still_maps_correctly(self):
         base_sd = _make_granite_base_state_dict(num_layers=1)
@@ -144,7 +137,10 @@ class TestGraniteDenseArchDescriptor:
         arch = granite_dense_arch()
         group_names = [g.name for g in arch.groups]
         assert group_names == [
-            "qkv_proj", "o_proj", "shared_input_linear", "shared_output_linear",
+            "qkv_proj",
+            "o_proj",
+            "shared_input_linear",
+            "shared_output_linear",
         ]
 
     def test_granite_dense_preserves_multiplier_defaults(self):
@@ -177,9 +173,7 @@ class TestAdapterRemappingGranite:
             "base_model.model.model.layers.0.mlp.gate_proj.lora_A.weight"
         )
         assert result is not None
-        assert result.target_name == (
-            "model.layers.0.shared_mlp.input_linear.lora_A_slices.0"
-        )
+        assert result.target_name == ("model.layers.0.shared_mlp.input_linear.lora_A_slices.0")
 
     def test_up_proj_lora_b_maps_to_shared_input_linear_slice_1(self):
         arch = granite_dense_arch()
@@ -189,9 +183,7 @@ class TestAdapterRemappingGranite:
             "base_model.model.model.layers.0.mlp.up_proj.lora_B.weight"
         )
         assert result is not None
-        assert result.target_name == (
-            "model.layers.0.shared_mlp.input_linear.lora_B_slices.1"
-        )
+        assert result.target_name == ("model.layers.0.shared_mlp.input_linear.lora_B_slices.1")
 
     def test_down_proj_lora_a_maps_to_shared_output_linear(self):
         arch = granite_dense_arch()
@@ -201,9 +193,7 @@ class TestAdapterRemappingGranite:
             "base_model.model.model.layers.0.mlp.down_proj.lora_A.weight"
         )
         assert result is not None
-        assert result.target_name == (
-            "model.layers.0.shared_mlp.output_linear.lora_A"
-        )
+        assert result.target_name == ("model.layers.0.shared_mlp.output_linear.lora_A")
 
     def test_q_proj_lora_a_maps_to_qkv_slice_0(self):
         arch = granite_dense_arch()
@@ -213,9 +203,7 @@ class TestAdapterRemappingGranite:
             "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight"
         )
         assert result is not None
-        assert result.target_name == (
-            "model.layers.0.self_attn.qkv_proj.lora_A_slices.0"
-        )
+        assert result.target_name == ("model.layers.0.self_attn.qkv_proj.lora_A_slices.0")
 
     def test_o_proj_lora_b_maps_correctly(self):
         arch = granite_dense_arch()

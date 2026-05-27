@@ -6,9 +6,9 @@ transfer, using the architecture descriptor to parameterize module group
 knowledge.
 """
 
-import torch
 from collections import defaultdict
-from typing import Dict, List, Optional
+
+import torch
 
 from .arch import ArchDescriptor
 
@@ -16,9 +16,9 @@ from .arch import ArchDescriptor
 def validate_all_parameters(
     model,
     arch: ArchDescriptor,
-    adapter_paths: Optional[List[str]] = None,
-    adapter_names: Optional[List[str]] = None,
-    target_module_sets: Optional[List[set]] = None,
+    adapter_paths: list[str] | None = None,
+    adapter_names: list[str] | None = None,
+    target_module_sets: list[set] | None = None,
 ):
     """Validate that all model parameters are properly initialized.
 
@@ -38,7 +38,7 @@ def validate_all_parameters(
     unexpected_zero_lora = []
 
     # Build adapter module map if paths provided
-    adapter_has_module: Dict[int, set] = {}
+    adapter_has_module: dict[int, set] = {}
     if adapter_paths:
         if target_module_sets is None:
             from .adapter_loader import load_adapter_target_modules
@@ -71,9 +71,7 @@ def validate_all_parameters(
                     missing_from_adapters = []
 
                     for adapter_idx, has_modules in adapter_has_module.items():
-                        if peft_modules and any(
-                            pm in has_modules for pm in peft_modules
-                        ):
+                        if peft_modules and any(pm in has_modules for pm in peft_modules):
                             should_be_populated = True
                         else:
                             if adapter_names is not None:
@@ -82,9 +80,7 @@ def validate_all_parameters(
                                 from pathlib import Path as _Path
 
                                 label = _Path(adapter_paths[adapter_idx]).parent.parent.name
-                            missing_from_adapters.append(
-                                f"{label}({adapter_idx})"
-                            )
+                            missing_from_adapters.append(f"{label}({adapter_idx})")
 
                     if should_be_populated:
                         if len(missing_from_adapters) == len(adapter_paths):
@@ -109,10 +105,7 @@ def validate_all_parameters(
     # ---- Report ----
 
     if uninit_params:
-        print(
-            f"\nWARNING: {len(uninit_params)} base model parameters "
-            f"appear uninitialized:"
-        )
+        print(f"\nWARNING: {len(uninit_params)} base model parameters " f"appear uninitialized:")
         for name, reason, _ in uninit_params[:10]:
             print(f"  - {name} ({reason})")
         if len(uninit_params) > 10:
@@ -120,10 +113,7 @@ def validate_all_parameters(
         print("\nThis is unexpected and may indicate a problem with weight transfer")
 
     if unexpected_zero_lora:
-        print(
-            f"\nWARNING: {len(unexpected_zero_lora)} LoRA parameters "
-            f"are unexpectedly zero:"
-        )
+        print(f"\nWARNING: {len(unexpected_zero_lora)} LoRA parameters " f"are unexpectedly zero:")
         for name, module, reason, adapters in unexpected_zero_lora[:10]:
             print(f"  - {name}")
             print(f"      Module: {module}, Reason: {reason}")
@@ -138,9 +128,7 @@ def validate_all_parameters(
         print("\nThese should have been populated by adapters")
 
     if expected_zero_lora:
-        print(
-            f"\nINFO: {len(expected_zero_lora)} LoRA parameters are zero (as expected):"
-        )
+        print(f"\nINFO: {len(expected_zero_lora)} LoRA parameters are zero (as expected):")
 
         by_reason = defaultdict(list)
         for name, module, reason, adapters in expected_zero_lora:
@@ -149,13 +137,11 @@ def validate_all_parameters(
         for reason, items in by_reason.items():
             print(f"\n  {reason}: {len(items)} parameters")
             if reason == "no_adapter_targets":
-                print(f"    -> No adapter targets these modules")
+                print("    -> No adapter targets these modules")
             elif reason == "zero_padding_or_partial":
-                print(
-                    f"    -> Zero-padding or some adapters don't target these modules"
-                )
+                print("    -> Zero-padding or some adapters don't target these modules")
 
-            for name, module, adapters in items[:3]:
+            for name, _module, adapters in items[:3]:
                 print(f"      - {name}")
                 if adapters:
                     print(
@@ -166,21 +152,13 @@ def validate_all_parameters(
             if len(items) > 3:
                 print(f"      ... and {len(items) - 3} more")
 
-        print(f"\n  These zeros are normal and expected")
+        print("\n  These zeros are normal and expected")
 
     total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(
-        p.numel() for p in model.parameters() if p.requires_grad
-    )
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = total_params - trainable_params
 
-    print(f"\nParameter summary:")
+    print("\nParameter summary:")
     print(f"  Total: {total_params:,}")
-    print(
-        f"  Trainable: {trainable_params:,} "
-        f"({100 * trainable_params / total_params:.1f}%)"
-    )
-    print(
-        f"  Frozen: {frozen_params:,} "
-        f"({100 * frozen_params / total_params:.1f}%)"
-    )
+    print(f"  Trainable: {trainable_params:,} " f"({100 * trainable_params / total_params:.1f}%)")
+    print(f"  Frozen: {frozen_params:,} " f"({100 * frozen_params / total_params:.1f}%)")

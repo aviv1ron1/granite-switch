@@ -2,18 +2,17 @@
 """Adapter population table generation and printing."""
 
 import torch
-from typing import Dict, List
 
-from ..arch import ArchDescriptor
 from ..adapter_loader import load_adapter_target_modules
+from ..arch import ArchDescriptor
 
 
 def generate_adapter_population_table(
     model,
-    adapter_paths: List[str],
-    adapter_names: List[str] = None,
+    adapter_paths: list[str],
+    adapter_names: list[str] = None,
     arch: ArchDescriptor = None,
-    target_module_sets: List[set] = None,
+    target_module_sets: list[set] = None,
 ):
     """Generate table showing how each module type was populated from each adapter.
 
@@ -46,9 +45,7 @@ def generate_adapter_population_table(
     if adapter_names is None:
         from pathlib import Path
 
-        adapter_names = [
-            Path(p).parent.parent.name for p in adapter_paths
-        ]
+        adapter_names = [Path(p).parent.parent.name for p in adapter_paths]
 
     if target_module_sets is None:
         target_module_sets = load_adapter_target_modules(adapter_paths)
@@ -76,10 +73,7 @@ def generate_adapter_population_table(
         base_module = module_type.rsplit(".lora_", 1)[0]
         is_lora_A = "lora_A" in module_type
         is_sliced = base_module in sliced_modules
-        needs_padding_by = {
-            i: (adapter_configs[i]["rank"] < max_rank)
-            for i in range(num_adapters)
-        }
+        needs_padding_by = {i: (adapter_configs[i]["rank"] < max_rank) for i in range(num_adapters)}
 
         # Build the pattern fragment to match
         if is_sliced:
@@ -95,9 +89,7 @@ def generate_adapter_population_table(
 
         # Find matching params once per module type (not per adapter)
         matching_params = [
-            (name, tensor)
-            for name, tensor in state_dict.items()
-            if param_pattern in name
+            (name, tensor) for name, tensor in state_dict.items() if param_pattern in name
         ]
 
         for adapter_idx in range(num_adapters):

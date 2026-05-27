@@ -5,8 +5,6 @@ __version__ = "0.1.0"
 
 # Export main classes
 from granite_switch.config import GraniteSwitchConfig
-from .granite_switch_model import GraniteSwitchForCausalLM, GraniteSwitchModel
-from .switch import SingleSwitch
 
 # Export core components (for advanced use)
 from .core import (
@@ -14,6 +12,8 @@ from .core import (
     GraniteSwitchDecoderLayer,
     SwitchedLoRALinear,
 )
+from .granite_switch_model import GraniteSwitchForCausalLM, GraniteSwitchModel
+from .switch import SingleSwitch
 
 __all__ = [
     # Main API
@@ -31,6 +31,7 @@ __all__ = [
 # Register config with transformers AutoConfig
 try:
     from transformers import AutoConfig
+
     AutoConfig.register("granite_switch", GraniteSwitchConfig)
 except Exception:
     # Registration may fail if already registered or transformers not available
@@ -48,6 +49,7 @@ def register():
     # Register config with transformers AutoConfig
     try:
         from transformers import AutoConfig
+
         AutoConfig.register("granite_switch", GraniteSwitchConfig)
     except Exception:
         pass
@@ -80,9 +82,7 @@ def register():
                 cfg = self.hf_text_config
                 return getattr(cfg, "projection_head_dim", super().get_head_size())
 
-        MODEL_ARCH_CONFIG_CONVERTORS["granite_switch"] = (
-            _GraniteSwitchArchConfigConvertor
-        )
+        MODEL_ARCH_CONFIG_CONVERTORS["granite_switch"] = _GraniteSwitchArchConfigConvertor
     except ImportError:
         pass
 

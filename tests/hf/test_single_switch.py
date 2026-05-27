@@ -10,25 +10,27 @@ This file provides:
 
 import pytest
 import torch
-
-from granite_switch.hf.switch.single import SingleSwitch
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+from granite_switch.hf.switch.single import SingleSwitch
 from tests.shared.single_switch_cases import (
-    NUM_ADAPTERS, TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST,
-    SingleSwitchTokenMatchingCases,
+    ADAPTER_TOKEN_IDS_LIST,
+    NUM_ADAPTERS,
+    TEXT_TOKEN,
     SingleSwitchAdapterRetrievalCases,
-    SingleSwitchEdgeCases,
-    SingleSwitchShapeCorrectnessCases,
     SingleSwitchContextLengthSweepCases,
+    SingleSwitchEdgeCases,
     SingleSwitchGainSensitivityCases,
+    SingleSwitchShapeCorrectnessCases,
+    SingleSwitchTokenMatchingCases,
 )
-
 
 # ── Config ──────────────────────────────────────────────────────────
 
+
 class _AttnConfig:
     """Minimal config to select an HF attention backend."""
+
     def __init__(self, backend="sdpa"):
         self._attn_implementation = backend
         self._pre_quantization_dtype = torch.bfloat16
@@ -42,9 +44,7 @@ class _AttnConfig:
 # retrieval call (3 positions, head_dim=32).  Backends that don't work on the
 # current platform are skipped in tests.
 
-_NON_EAGER_BACKENDS = sorted(
-    name for name in ALL_ATTENTION_FUNCTIONS if "eager" not in name
-)
+_NON_EAGER_BACKENDS = sorted(name for name in ALL_ATTENTION_FUNCTIONS if "eager" not in name)
 
 
 def _probe_single_switch_backend(name):
@@ -57,7 +57,9 @@ def _probe_single_switch_backend(name):
     try:
         config = _AttnConfig(name)
         module = SingleSwitch(
-            num_adapters=4, config=config, control_token_gain=15.0,
+            num_adapters=4,
+            config=config,
+            control_token_gain=15.0,
         )
         head_dim = module.head_dim
         gain = 15.0
@@ -73,8 +75,14 @@ def _probe_single_switch_backend(name):
         v[0, 0, 1, 0] = 2.0
 
         output, _ = fn(
-            module, q, k, v, None,
-            dropout=0.0, scaling=1.0, sliding_window=None,
+            module,
+            q,
+            k,
+            v,
+            None,
+            dropout=0.0,
+            scaling=1.0,
+            sliding_window=None,
         )
 
         if output.shape != (1, 3, 1, head_dim):
@@ -93,13 +101,9 @@ def _probe_single_switch_backend(name):
         return False, str(e).split("\n")[0]
 
 
-_BACKEND_PROBE_RESULTS = {
-    name: _probe_single_switch_backend(name) for name in _NON_EAGER_BACKENDS
-}
+_BACKEND_PROBE_RESULTS = {name: _probe_single_switch_backend(name) for name in _NON_EAGER_BACKENDS}
 
-_AVAILABLE_BACKENDS = [
-    name for name in _NON_EAGER_BACKENDS if _BACKEND_PROBE_RESULTS[name][0]
-]
+_AVAILABLE_BACKENDS = [name for name in _NON_EAGER_BACKENDS if _BACKEND_PROBE_RESULTS[name][0]]
 
 
 @pytest.fixture(params=_AVAILABLE_BACKENDS)
@@ -115,6 +119,7 @@ def backend(request):
 
 
 # ── HF _run adapter ─────────────────────────────────────────────────
+
 
 def _make_switch(backend="sdpa", num_adapters=NUM_ADAPTERS, control_token_gain=15.0):
     return SingleSwitch(
@@ -138,12 +143,14 @@ class _HFSingleSwitchBase:
         # Switch returns (adapter_indices, modified_input_ids); these tests
         # only check adapter selection so we drop the rewritten ids here.
         adapter_indices, _modified = switch.forward(
-            input_ids=input_ids, adapter_token_ids=token_ids,
+            input_ids=input_ids,
+            adapter_token_ids=token_ids,
         )
         return adapter_indices[0].tolist()
 
 
 # ── Shared test classes (from mixin) ────────────────────────────────
+
 
 class TestTokenMatching(_HFSingleSwitchBase, SingleSwitchTokenMatchingCases):
     pass
@@ -171,18 +178,22 @@ class TestGainSensitivity(_HFSingleSwitchBase, SingleSwitchGainSensitivityCases)
 
 # ── HF-only tests ───────────────────────────────────────────────────
 
+
 class TestBatchProcessing:
     """Batch independence (HF-only: vLLM batches externally)."""
 
     def test_batch_independence(self, backend):
         switch = _make_switch(backend, num_adapters=4)
         token_ids = torch.tensor(ADAPTER_TOKEN_IDS_LIST[:4])
-        input_ids = torch.tensor([
-            [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[0], TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN],
-            [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[3], TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN],
-        ])
+        input_ids = torch.tensor(
+            [
+                [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[0], TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN],
+                [TEXT_TOKEN, ADAPTER_TOKEN_IDS_LIST[3], TEXT_TOKEN, TEXT_TOKEN, TEXT_TOKEN],
+            ]
+        )
         adapter_indices, _modified = switch.forward(
-            input_ids=input_ids, adapter_token_ids=token_ids,
+            input_ids=input_ids,
+            adapter_token_ids=token_ids,
         )
         assert (adapter_indices[0, 2:] == 1).all()
         assert (adapter_indices[1, 2:] == 4).all()

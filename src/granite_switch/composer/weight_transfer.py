@@ -4,15 +4,13 @@
 Driven by :class:`ArchDescriptor` fusion rules instead of inline if/elif chains.
 """
 
-import re
 import gc
-import torch
-from typing import Dict, List, Optional, Tuple
+import re
 
+import torch
 from tqdm import tqdm
 
 from .arch import ArchDescriptor
-
 
 # ---------------------------------------------------------------------------
 # Base weight loading
@@ -22,7 +20,7 @@ from .arch import ArchDescriptor
 def _load_base_state_dict(
     model_name_or_path: str,
     dtype: torch.dtype,
-) -> Tuple[Dict[str, torch.Tensor], int]:
+) -> tuple[dict[str, torch.Tensor], int]:
     """Load base model state dict via ``AutoModelForCausalLM``.
 
     Returns the state dict and the unique-parameter count (from
@@ -56,7 +54,7 @@ def transfer_base_weights(
     switch_config,
     arch: ArchDescriptor,
     return_mapping: bool = True,
-) -> Optional[Dict]:
+) -> dict | None:
     """Load base model weights and transfer to switch model.
 
     Uses ``arch.groups`` to drive QKV and gate/up fusion instead of
@@ -100,16 +98,16 @@ def transfer_base_weights(
     # Record target params (excluding LoRA and buffers)
     exclude_keywords = arch.lora_keywords + arch.buffer_keywords
     mapping_record["target_params"] = [
-        name
-        for name in switch_state_dict.keys()
-        if not any(kw in name for kw in exclude_keywords)
+        name for name in switch_state_dict.keys() if not any(kw in name for kw in exclude_keywords)
     ]
 
     lora_target_modules = switch_config.lora_target_modules
 
     # ---- Classify every base weight ----
     fused_collections, base_to_switch = _classify_base_weights(
-        base_state_dict, arch, lora_target_modules,
+        base_state_dict,
+        arch,
+        lora_target_modules,
     )
 
     # ---- Transfer weights ----
@@ -138,13 +136,9 @@ def transfer_base_weights(
             g = groups_by_name[target_name]
             attr = g.effective_attr_name
             if target_name in lora_target_modules:
-                switch_name = (
-                    f"model.layers.{layer_idx}.{g.parent}.{attr}.base_layer.weight"
-                )
+                switch_name = f"model.layers.{layer_idx}.{g.parent}.{attr}.base_layer.weight"
             else:
-                switch_name = (
-                    f"model.layers.{layer_idx}.{g.parent}.{attr}.weight"
-                )
+                switch_name = f"model.layers.{layer_idx}.{g.parent}.{attr}.weight"
 
             if "fused" in collection:
                 # Already fused (from remapper, e.g., Granite 4-micro shared_mlp)
@@ -161,9 +155,7 @@ def transfer_base_weights(
             else:
                 # Fuse from separate sources
                 if all(src in collection for src in g.peft_modules):
-                    fused_tensor = torch.cat(
-                        [collection[src] for src in g.peft_modules], dim=0
-                    )
+                    fused_tensor = torch.cat([collection[src] for src in g.peft_modules], dim=0)
                     if switch_name in switch_state_dict:
                         switch_state_dict[switch_name].copy_(fused_tensor)
                         transferred_count += len(g.peft_modules)
@@ -195,9 +187,9 @@ def transfer_base_weights(
 
 
 def _classify_base_weights(
-    base_state_dict: Dict[str, torch.Tensor],
+    base_state_dict: dict[str, torch.Tensor],
     arch: ArchDescriptor,
-    lora_target_modules: List[str],
+    lora_target_modules: list[str],
 ):
     """Classify every base model weight into fusion collections or direct mappings.
 
@@ -207,7 +199,7 @@ def _classify_base_weights(
         maps base param names to their switch model counterparts.
     """
     # Build lookup structures from groups
-    source_to_group: Dict[str, object] = {}  # peft_module -> ModuleDescriptor
+    source_to_group: dict[str, object] = {}  # peft_module -> ModuleDescriptor
     fusion_names = set()
     for g in arch.groups:
         if g.is_base_fusion:
@@ -215,8 +207,8 @@ def _classify_base_weights(
             for src in g.peft_modules:
                 source_to_group[src] = g
 
-    fused_collections: Dict = {}
-    base_to_switch: Dict[str, str] = {}
+    fused_collections: dict = {}
+    base_to_switch: dict[str, str] = {}
 
     for base_name in base_state_dict.keys():
         matched = False
@@ -280,9 +272,7 @@ def _classify_base_weights(
                             f"{inner}base_layer.weight"
                         )
                     else:
-                        switch_name = (
-                            f"model.layers.{layer_idx}.{g.parent}.{target_attr}.weight"
-                        )
+                        switch_name = f"model.layers.{layer_idx}.{g.parent}.{target_attr}.weight"
                     base_to_switch[base_name] = switch_name
                     is_standalone = True
                 break
@@ -306,9 +296,7 @@ def _validate_base_transfer(
     """Validate that all expected base parameters were loaded."""
     exclude_keywords = arch.lora_keywords + arch.buffer_keywords
     expected_switch_params = {
-        name
-        for name in switch_state_dict.keys()
-        if not any(kw in name for kw in exclude_keywords)
+        name for name in switch_state_dict.keys() if not any(kw in name for kw in exclude_keywords)
     }
 
     loaded_switch_params = set(base_to_switch.values())
@@ -320,48 +308,33 @@ def _validate_base_transfer(
         parent = g.parent
         attr = g.effective_attr_name
         if target_name in lora_target_modules:
-            loaded_switch_params.add(
-                f"model.layers.{layer_idx}.{parent}.{attr}.base_layer.weight"
-            )
+            loaded_switch_params.add(f"model.layers.{layer_idx}.{parent}.{attr}.base_layer.weight")
         else:
-            loaded_switch_params.add(
-                f"model.layers.{layer_idx}.{parent}.{attr}.weight"
-            )
+            loaded_switch_params.add(f"model.layers.{layer_idx}.{parent}.{attr}.weight")
 
     missing_in_switch = loaded_switch_params - expected_switch_params
     if missing_in_switch:
-        print(
-            f"\nWARNING: {len(missing_in_switch)} base parameters "
-            f"not found in switch model:"
-        )
+        print(f"\nWARNING: {len(missing_in_switch)} base parameters " f"not found in switch model:")
         for name in sorted(list(missing_in_switch)[:10]):
             print(f"  - {name}")
         if len(missing_in_switch) > 10:
             print(f"  ... and {len(missing_in_switch) - 10} more")
         raise ValueError(
-            f"Base model has {len(missing_in_switch)} parameters "
-            f"not found in switch model"
+            f"Base model has {len(missing_in_switch)} parameters " f"not found in switch model"
         )
 
     missing_in_base = expected_switch_params - loaded_switch_params
     if missing_in_base:
-        print(
-            f"\nWARNING: {len(missing_in_base)} switch parameters "
-            f"not loaded from base:"
-        )
+        print(f"\nWARNING: {len(missing_in_base)} switch parameters " f"not loaded from base:")
         for name in sorted(list(missing_in_base)[:10]):
             print(f"  - {name}")
         if len(missing_in_base) > 10:
             print(f"  ... and {len(missing_in_base) - 10} more")
         raise ValueError(
-            f"Switch model has {len(missing_in_base)} parameters "
-            f"not loaded from base model"
+            f"Switch model has {len(missing_in_base)} parameters " f"not loaded from base model"
         )
 
-    print(
-        f"All {len(expected_switch_params)} base model parameters "
-        f"successfully validated"
-    )
+    print(f"All {len(expected_switch_params)} base model parameters " f"successfully validated")
 
 
 # ---------------------------------------------------------------------------
@@ -370,12 +343,12 @@ def _validate_base_transfer(
 
 
 def stack_adapters(
-    adapter_state_dicts: List[Dict[str, torch.Tensor]],
+    adapter_state_dicts: list[dict[str, torch.Tensor]],
     remapper,
     num_adapters: int,
     max_lora_rank: int,
-    adapter_ranks: List[int],
-    adapter_alphas: List[float],
+    adapter_ranks: list[int],
+    adapter_alphas: list[float],
     verbose: bool = True,
 ):
     """Stack adapter weights into ``[num_adapters, 1, ...]`` tensors.
@@ -405,9 +378,9 @@ def stack_adapters(
         and a list of ``{"source": src, "target": target, "type": mtype}``
         dicts recorded during stacking.
     """
-    stacked: Dict[str, torch.Tensor] = {}
+    stacked: dict[str, torch.Tensor] = {}
     # Track source→target mappings: target_name → set of source names
-    source_map: Dict[str, set] = {}
+    source_map: dict[str, set] = {}
     remap_count = 0
 
     for adapter_idx, adapter_state_dict in enumerate(adapter_state_dicts):
@@ -424,8 +397,15 @@ def stack_adapters(
             if result.split_slices:
                 # Fused-to-sliced split: distribute tensor across slices
                 _stack_split(
-                    stacked, result, tensor, adapter_idx, adapter_rank,
-                    adapter_alpha, num_adapters, max_lora_rank, src_name,
+                    stacked,
+                    result,
+                    tensor,
+                    adapter_idx,
+                    adapter_rank,
+                    adapter_alpha,
+                    num_adapters,
+                    max_lora_rank,
+                    src_name,
                 )
                 # Record mapping for each produced slice
                 for i in range(result.split_slices):
@@ -435,26 +415,33 @@ def stack_adapters(
                 # Standard (non-split) stacking
                 target_name = result.target_name
                 _stack_single(
-                    stacked, target_name, tensor, adapter_idx, adapter_rank,
-                    adapter_alpha, num_adapters, max_lora_rank, src_name,
+                    stacked,
+                    target_name,
+                    tensor,
+                    adapter_idx,
+                    adapter_rank,
+                    adapter_alpha,
+                    num_adapters,
+                    max_lora_rank,
+                    src_name,
                 )
                 source_map.setdefault(target_name, set()).add(tagged_src)
 
             if verbose and remap_count < 5:
                 print(
                     f"  Stack: {src_name} -> {result.target_name}[{adapter_idx}, 0]"
-                    + (f" (split: {result.split_type}x{result.split_slices})"
-                       if result.split_slices else "")
+                    + (
+                        f" (split: {result.split_type}x{result.split_slices})"
+                        if result.split_slices
+                        else ""
+                    )
                 )
             remap_count += 1
 
     if verbose and remap_count > 0:
-        print(
-            f"Stacked {remap_count} adapter weights "
-            f"across {num_adapters} adapters"
-        )
+        print(f"Stacked {remap_count} adapter weights " f"across {num_adapters} adapters")
         if remap_count > 5:
-            print(f"  (showing first 5 examples)")
+            print("  (showing first 5 examples)")
 
     # Convert source_map to mapping records
     mappings = [
@@ -480,8 +467,15 @@ def _ensure_stacked(stacked, name, is_lora_a, tensor, num_adapters, max_lora_ran
 
 
 def _stack_single(
-    stacked, target_name, tensor, adapter_idx, adapter_rank,
-    adapter_alpha, num_adapters, max_lora_rank, src_name,
+    stacked,
+    target_name,
+    tensor,
+    adapter_idx,
+    adapter_rank,
+    adapter_alpha,
+    num_adapters,
+    max_lora_rank,
+    src_name,
 ):
     """Stack a single (non-split) adapter tensor into the stacked dict."""
     is_lora_a = "lora_A" in src_name
@@ -491,14 +485,19 @@ def _stack_single(
         stacked[target_name][adapter_idx, 0, :adapter_rank, :] = tensor
     else:
         scaling_factor = adapter_alpha / adapter_rank
-        stacked[target_name][adapter_idx, 0, :, :adapter_rank] = (
-            tensor * scaling_factor
-        )
+        stacked[target_name][adapter_idx, 0, :, :adapter_rank] = tensor * scaling_factor
 
 
 def _stack_split(
-    stacked, result, tensor, adapter_idx, adapter_rank,
-    adapter_alpha, num_adapters, max_lora_rank, src_name,
+    stacked,
+    result,
+    tensor,
+    adapter_idx,
+    adapter_rank,
+    adapter_alpha,
+    num_adapters,
+    max_lora_rank,
+    src_name,
 ):
     """Handle fused-to-sliced split: distribute one tensor across N slices.
 
@@ -526,9 +525,7 @@ def _stack_split(
         for i, chunk in enumerate(chunks):
             slice_name = f"{base_name}.{i}"
             _ensure_stacked(stacked, slice_name, False, chunk, num_adapters, max_lora_rank)
-            stacked[slice_name][adapter_idx, 0, :, :adapter_rank] = (
-                chunk * scaling_factor
-            )
+            stacked[slice_name][adapter_idx, 0, :, :adapter_rank] = chunk * scaling_factor
 
     else:
         raise ValueError(f"Unknown split_type: {result.split_type}")
@@ -540,12 +537,12 @@ def _stack_split(
 
 
 def transfer_adapter_weights(
-    adapter_paths: List[str],
+    adapter_paths: list[str],
     model,
-    adapter_alphas: List[float],
+    adapter_alphas: list[float],
     arch: ArchDescriptor,
     return_mapping: bool = True,
-) -> Optional[Dict]:
+) -> dict | None:
     """Load adapter weights, stack them, and transfer to switch model.
 
     Uses :func:`stack_adapters` for stacking and
@@ -587,7 +584,7 @@ def transfer_adapter_weights(
         remapper=adapter_remapper,
         num_adapters=model.config.num_adapters,
         max_lora_rank=model.config.max_lora_rank,
-        adapter_ranks=model.config.adapter_ranks[:len(adapter_paths)],
+        adapter_ranks=model.config.adapter_ranks[: len(adapter_paths)],
         adapter_alphas=adapter_alphas,
         verbose=True,
     )
@@ -595,9 +592,7 @@ def transfer_adapter_weights(
     # Record target params and mappings
     switch_state_dict = model.state_dict()
     mapping_record["target_params"] = [
-        name
-        for name in switch_state_dict.keys()
-        if any(kw in name for kw in arch.lora_keywords)
+        name for name in switch_state_dict.keys() if any(kw in name for kw in arch.lora_keywords)
     ]
     mapping_record["mappings"] = adapter_mappings
 
@@ -638,25 +633,21 @@ def _validate_adapter_transfer(
     are reported by :func:`validator.validate_all_parameters`, not here.
     """
     expected_lora_params = {
-        name
-        for name in switch_state_dict.keys()
-        if any(kw in name for kw in arch.lora_keywords)
+        name for name in switch_state_dict.keys() if any(kw in name for kw in arch.lora_keywords)
     }
     loaded_lora_params = set(stacked_adapters.keys())
 
     missing_in_switch = loaded_lora_params - expected_lora_params
     if missing_in_switch:
         print(
-            f"\nWARNING: {len(missing_in_switch)} adapter parameters "
-            f"not found in switch model:"
+            f"\nWARNING: {len(missing_in_switch)} adapter parameters " f"not found in switch model:"
         )
         for name in sorted(list(missing_in_switch)[:10]):
             print(f"  - {name}")
         if len(missing_in_switch) > 10:
             print(f"  ... and {len(missing_in_switch) - 10} more")
         raise ValueError(
-            f"Adapters have {len(missing_in_switch)} parameters "
-            f"not found in switch model"
+            f"Adapters have {len(missing_in_switch)} parameters " f"not found in switch model"
         )
 
     zero_init_count = len(expected_lora_params - loaded_lora_params)

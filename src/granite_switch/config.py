@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration for Granite model with adapter switching."""
 
-from typing import List, Optional
-
 from transformers import GraniteMoeHybridConfig
 
 
@@ -46,22 +44,22 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
     def __init__(
         self,
         num_adapters: int = 0,
-        adapter_token_ids: Optional[List[int]] = None,
-        adapter_substitute_token_ids: Optional[List[int]] = None,
+        adapter_token_ids: list[int] | None = None,
+        adapter_substitute_token_ids: list[int] | None = None,
         # SingleSwitch parameters
         control_token_gain: float = 15.0,
         switch_head_dim: int = 32,
         # Adapter parameters
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: list[str] | None = None,
         max_lora_rank: int = 8,
-        adapter_ranks: List[int] = None,
-        lora_target_modules: Optional[List[str]] = None,
+        adapter_ranks: list[int] = None,
+        lora_target_modules: list[str] | None = None,
         # vLLM residual-norm convention (for bit-exact skinning equivalence)
         fused_add_norm: bool = False,
         # Parent class defaults (Granite 4 dense configuration)
         num_local_experts: int = 0,
         position_embedding_type: str = "rope",
-        layer_types: Optional[List[str]] = None,
+        layer_types: list[str] | None = None,
         **kwargs,
     ):
         # Compute default layer_types before parent init.
@@ -100,9 +98,7 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             # Token-exchange builds the control→substitute LUT keyed by adapter token id;
             # duplicates would silently collapse to a single slot.
             if len(set(adapter_token_ids)) != len(adapter_token_ids):
-                raise ValueError(
-                    f"adapter_token_ids must be unique; got {adapter_token_ids}"
-                )
+                raise ValueError(f"adapter_token_ids must be unique; got {adapter_token_ids}")
         self.adapter_token_ids = adapter_token_ids
 
         # Validate adapter_substitute_token_ids — required when num_adapters > 0.
@@ -180,15 +176,19 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             if self.num_adapters > 0:
                 # Attention modules (present in all attention layers)
                 if any(lt == "attention" for lt in self.layer_types):
-                    lora_target_modules.extend([
-                        "qkv_proj",     # Q/K/V fused
-                        "o_proj",       # O projection
-                    ])
+                    lora_target_modules.extend(
+                        [
+                            "qkv_proj",  # Q/K/V fused
+                            "o_proj",  # O projection
+                        ]
+                    )
 
                 # MLP modules: all Granite 4 models use shared_mlp naming
-                lora_target_modules.extend([
-                    "shared_input_linear",   # shared_mlp input_linear (fused gate+up)
-                    "shared_output_linear",  # shared_mlp output_linear
-                ])
+                lora_target_modules.extend(
+                    [
+                        "shared_input_linear",  # shared_mlp input_linear (fused gate+up)
+                        "shared_output_linear",  # shared_mlp output_linear
+                    ]
+                )
 
         self.lora_target_modules = lora_target_modules

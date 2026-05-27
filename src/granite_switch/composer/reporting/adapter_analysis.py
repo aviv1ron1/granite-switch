@@ -1,10 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Adapter analysis and diagnostics — printing utilities."""
 
-from typing import Dict
 
-
-def print_source_adapter_analysis(analysis: Dict):
+def print_source_adapter_analysis(analysis: dict):
     """Print the source adapter analysis table."""
     adapter_names = analysis["adapter_names"]
     module_types = analysis["module_types"]
@@ -67,24 +65,19 @@ def print_source_adapter_analysis(analysis: Dict):
     print("\nSummary:")
     total_cells = len(module_types) * len(adapter_names)
     populated_count = sum(
-        1 for mt in module_types for an in adapter_names
-        if status[mt].get(an) == "populated"
+        1 for mt in module_types for an in adapter_names if status[mt].get(an) == "populated"
     )
     not_targeted_count = sum(
-        1 for mt in module_types for an in adapter_names
-        if status[mt].get(an) == "not-targeted"
+        1 for mt in module_types for an in adapter_names if status[mt].get(an) == "not-targeted"
     )
     missing_count = sum(
-        1 for mt in module_types for an in adapter_names
-        if status[mt].get(an) == "missing*"
+        1 for mt in module_types for an in adapter_names if status[mt].get(an) == "missing*"
     )
     zero_count = sum(
-        1 for mt in module_types for an in adapter_names
-        if status[mt].get(an) == "zero*"
+        1 for mt in module_types for an in adapter_names if status[mt].get(an) == "zero*"
     )
     unexpected_count = sum(
-        1 for mt in module_types for an in adapter_names
-        if status[mt].get(an) == "unexpected"
+        1 for mt in module_types for an in adapter_names if status[mt].get(an) == "unexpected"
     )
 
     correct_count = populated_count + not_targeted_count

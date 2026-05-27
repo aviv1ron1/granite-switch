@@ -109,5 +109,3 @@ def show_intermediates(r, top_k):
         md.append("\n*(none)*")
 
     display(Markdown("\n\n".join(md)))
-
-

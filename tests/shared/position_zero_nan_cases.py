@@ -29,7 +29,6 @@ import torch.nn.functional as F
 
 from tests.shared.gap_equivalence import SWITCH_TYPES
 
-
 # ════════════════════════════════════════════════════════════════════
 # SDPA NaN cases (backend-agnostic)
 # ════════════════════════════════════════════════════════════════════
@@ -65,7 +64,6 @@ class SDPANaNCases:
     def test_post_fix_q_ctrl_zero_is_finite_longer_sequence(self):
         """Post-fix: q_ctrl=0.0 remains finite for seq_len=8."""
         assert self._sdpa_is_finite(q_ctrl_value=0.0, seq_len=8)
-
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -11,7 +11,6 @@ Markers: slow, requires_model (both defined in pyproject.toml).
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -113,9 +112,7 @@ class TestBuildE2E:
         io_configs = build_output / "io_configs"
         assert io_configs.is_dir(), "Missing io_configs/ directory"
         yaml_files = list(io_configs.glob("*/io.yaml"))
-        assert len(yaml_files) >= 1, (
-            f"Expected at least 1 io.yaml file, found {len(yaml_files)}"
-        )
+        assert len(yaml_files) >= 1, f"Expected at least 1 io.yaml file, found {len(yaml_files)}"
 
     def test_config_correctness(self, build_output):
         """Verify key config.json fields match expected values."""
@@ -148,9 +145,9 @@ class TestBuildE2E:
         print(f"Base count:      {BASE_PARAM_COUNT:,}")
         print(f"Overhead:        {overhead:,} ({overhead_pct:.2f}%)")
 
-        assert total_elements > BASE_PARAM_COUNT, (
-            f"Expected > {BASE_PARAM_COUNT:,} params, got {total_elements:,}"
-        )
+        assert (
+            total_elements > BASE_PARAM_COUNT
+        ), f"Expected > {BASE_PARAM_COUNT:,} params, got {total_elements:,}"
 
     def test_vocabulary_expanded(self, build_output):
         """Verify vocab_size in config reflects the added control tokens."""
@@ -169,8 +166,7 @@ class TestBuildE2E:
 
         adapters = index["adapters"]
         assert len(adapters) >= 1, (
-            f"Expected at least 1 adapter in adapter_index.json, "
-            f"got {len(adapters)}"
+            f"Expected at least 1 adapter in adapter_index.json, " f"got {len(adapters)}"
         )
 
         for entry in adapters:
@@ -206,9 +202,9 @@ class TestBuildE2E:
         tokenizer = AutoTokenizer.from_pretrained(str(build_output))
         config = json.loads((build_output / "config.json").read_text())
         expected_vocab = BASE_VOCAB_SIZE + config["num_adapters"]
-        assert len(tokenizer) == expected_vocab, (
-            f"Expected tokenizer len={expected_vocab}, got {len(tokenizer)}"
-        )
+        assert (
+            len(tokenizer) == expected_vocab
+        ), f"Expected tokenizer len={expected_vocab}, got {len(tokenizer)}"
 
         # Cross-check with adapter_index.json
         index = json.loads((build_output / "adapter_index.json").read_text())
@@ -230,16 +226,12 @@ class TestBuildE2E:
         gen_config = json.loads(gen_config_path.read_text())
 
         # Must contain essential generation parameters from the base model
-        assert "eos_token_id" in gen_config, (
-            "generation_config.json missing eos_token_id"
-        )
-        assert "bos_token_id" in gen_config, (
-            "generation_config.json missing bos_token_id"
-        )
+        assert "eos_token_id" in gen_config, "generation_config.json missing eos_token_id"
+        assert "bos_token_id" in gen_config, "generation_config.json missing bos_token_id"
 
     def test_model_loads(self, build_output):
         """Verify the model loads with device_map='meta' (no memory used)."""
-        from transformers import AutoConfig, AutoModelForCausalLM
+        from transformers import AutoModelForCausalLM
 
         # Register our custom model class
         import granite_switch.hf  # noqa: F401
