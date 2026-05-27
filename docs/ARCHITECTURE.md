@@ -69,7 +69,7 @@ These fields are specific to Granite Switch and not present in base Granite:
 ### Granite-Specific Parameters (inherited from base model)
 
 - **`attention_multiplier`**: Attention score scaling (replaces `1/sqrt(head_dim)`)
-- **`logits_scaling`**: Applied to final logits (main architectural difference with Llama)
+- **`logits_scaling`**: Applied to final logits
 - **`residual_multiplier`**: Applied to residual connections
 - **`embedding_multiplier`**: Applied to input embeddings
 

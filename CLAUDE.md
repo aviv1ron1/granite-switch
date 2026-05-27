@@ -90,7 +90,7 @@ pytest tests/integration/ -v -s --tb=short -x
 ## Key Configuration Parameters
 
 - **`attention_multiplier`**: Attention score scaling (instead of `1/sqrt(head_dim)`)
-- **`logits_scaling`**: Applied to final logits (main architectural difference with Llama)
+- **`logits_scaling`**: Applied to final logits
 - **`residual_multiplier`**: Applied to residual connections
 - **`embedding_multiplier`**: Applied to input embeddings
 
@@ -113,15 +113,7 @@ model can produce any control token during generation.
 - **ALORA adapters**: Token placed either in user message by matching invocation sequence or right before generation prompt
 - **LORA adapters**: Token placed at sequence beginning
 
-### 4. Granite vs Llama Differences
-
-- Granite uses `logits_scaling` (typically 8.0)
-- Custom attention scaling via `attention_multiplier`
-- Different residual and embedding multipliers
-
-Always load from config, never hardcode.
-
-### 5. Hidden Count Offset When Position 0 is in a Hiding Group
+### 4. Hidden Count Offset When Position 0 is in a Hiding Group
 
 When position 0 is a control token in a hiding group (e.g., a LoRA prefix token with
 `add_bos_token=False`), `hidden_count` is off by 1, causing a 1-position RoPE offset. This is
