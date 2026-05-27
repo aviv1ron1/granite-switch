@@ -100,11 +100,3 @@ changes. Rejected: it reduces the cost but doesn't eliminate it — KV cache sti
 non-native head dims, and the `hidden_count` RoPE-correction gotcha stays. Token
 exchange achieves zero overhead at the same engineering cost, so the fallback wasn't
 worth shipping.
-
-**Train a learned hiding mechanism (e.g., gated K projection).** Rejected: requires
-retraining the base model or fine-tuning the adapters, which is outside the scope of
-a packaging system. Token exchange achieves the same outcome with zero training.
-
-**Pad K only (not Q or V) to a native-multiple head dim.** Rejected: still costs KV
-memory and still falls off the FlashAttention fast path; the padding-vs-native-dim
-tradeoff doesn't actually go away.
