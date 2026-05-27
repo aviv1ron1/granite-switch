@@ -35,25 +35,14 @@ pip install -e ".[hf,compose]"  # HF + composer only (no vLLM)
 
 ### Test Files (Python)
 
-**All `test_*.py` test files MUST go in a `tests/` directory:**
+**`tests/` is for official regression tests ONLY.** Do NOT place throwaway diagnostic,
+debugging, or exploratory scripts in `tests/`. Use `scratch/` instead (it is gitignored).
+Running `pytest tests/` should only execute curated, maintained tests — never one-off
+investigations. Subdirectories are listed in Project Structure above.
 
-- **`tests/unit/`**: Unit tests (fastest, CPU-only)
-- **`tests/hf/`**: HuggingFace implementation tests
-- **`tests/vllm/`**: vLLM implementation tests
-- **`tests/composer/`**: Compose system tests
-- **`tests/integration/`**: Cross-implementation and end-to-end integration tests
-- **`tests/regression/`**: Regression tests (hf/, vllm/, integration/, shared/, tools/)
-- **`tests/shared/`**: Shared test utilities and parametrized cases
+### Documentation Naming
 
-**IMPORTANT: `tests/` is for official regression tests ONLY.** Do NOT place throwaway diagnostic,
-debugging, or exploratory scripts in `tests/`. Use `scratch/` instead (it is gitignored). Running
-`pytest tests/` should only execute curated, maintained tests — never one-off investigations.
-
-### Naming Conventions
-
-- **Test files**: `test_*.py`
-- **Documentation**: `UPPER_CASE.md`
-- **Scripts**: `snake_case.py`
+`UPPER_CASE.md` for docs under `docs/`.
 
 ## Development Commands
 
@@ -135,14 +124,8 @@ Loaded on demand from child CLAUDE.md files when you touch those modules:
 
 ## Git Workflow
 
-**See [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) for complete git workflow guidelines.**
-
-- **Branch naming**: `feature/ticket-ID-description` or `bugfix/ticket-ID-description`
-- **Workflow**: Branch from `main` → develop → rebase → PR → merge → delete branch
-- **Critical**: Always verify comments match code before committing (see GIT_WORKFLOW.md)
-- **Commit format**: Clear summary + explanation of WHAT changed and WHY
-
-When committing, **never sign as Claude** (per project instructions)
+See [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) for branch naming, commit format, and
+PR workflow. **When committing, never sign as Claude** (per project instructions).
 
 ## License
 
