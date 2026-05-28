@@ -30,3 +30,13 @@ repos:
     rev: 0.8.1
     hooks:
       - id: nbstripout
+
+  - repo: local
+    hooks:
+      - id: validate-links
+        name: validate links and first-party imports
+        entry: python .pre-commit/validate_links.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: \.(ipynb|md|py)$
