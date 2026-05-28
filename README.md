@@ -135,6 +135,15 @@ Granite Switch is part of a coordinated stack:
 
 Granite Switch was started by IBM Research and is developed in the open. We welcome bug reports, feature requests, and pull requests — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines or open an [issue](https://github.com/generative-computing/granite-switch/issues).
 
+After cloning, enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, and basic hygiene checks):
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The auto-fixing hooks (ruff, nbstripout, whitespace) will clean up your changes on commit; if a hook modifies a file, re-stage and commit again.
+
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).

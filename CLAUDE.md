@@ -71,6 +71,8 @@ granite-switch/
 │   ├── regression/                      # Regression tests (hf/, vllm/, integration/, shared/, tools/)
 │   └── shared/                          # Shared test utilities and parametrized cases
 │
+├── .pre-commit/                         # Pre-commit hook scripts (validate_links.py)
+├── .pre-commit-config.yaml              # Pre-commit hook configuration
 ├── scratch/                             # Throwaway debug/diagnostic scripts (gitignored)
 ├── docs/                                # Documentation
 ├── tutorials/                           # Tutorials and how-to guides
@@ -373,8 +375,9 @@ skipped for this reason.
 ## Pre-commit
 
 This repo uses [pre-commit](https://pre-commit.com/) with ruff (lint + format), nbstripout,
-and the standard hygiene hooks (whitespace, EOF, YAML/TOML validity, merge conflicts, large
-files).
+a local `validate-links` hook (broken local links, stale labels, broken first-party imports
+in `.ipynb`/`.md`/`.py`; script lives at `.pre-commit/validate_links.py`), and the standard
+hygiene hooks (whitespace, EOF, YAML/TOML validity, merge conflicts, large files).
 
 After cloning:
 
