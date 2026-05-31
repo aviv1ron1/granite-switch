@@ -11,9 +11,15 @@ Thank you for your interest in contributing to Granite Switch!
    cd granite-switch
    pip install -e ".[dev]"
    ```
-3. Create a feature branch and make your changes
-4. Run tests: `pytest tests/ -v`
-5. Submit a pull request
+3. Enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, and basic hygiene checks):
+   ```bash
+   pip install pre-commit
+   pre-commit install
+   git config blame.ignoreRevsFile .git-blame-ignore-revs
+   ```
+4. Create a feature branch and make your changes
+5. Run tests: `pytest tests/ -v`
+6. Submit a pull request
 
 ## Contribution Guidelines
 
