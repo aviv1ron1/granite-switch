@@ -24,6 +24,7 @@ vllm = ["vllm>=0.19.1,<0.20.0"]
 vllm20 = ["vllm>=0.20.0,<0.21.0"]
 compose = ["huggingface_hub", "pyyaml", "tqdm", "safetensors"]
 build = ["huggingface_hub", "pyyaml", "tqdm", "safetensors"]  # Backward compatibility alias for compose
+onnx = ["onnx>=1.16.0", "onnxruntime>=1.18.0", "onnxscript>=0.1.0"]  # ONNX export + CPU runtime parity checks (opset>=18)
 tutorials = [
     "granite-switch[hf,vllm,compose]",
     "chromadb>=0.4.0",
@@ -36,7 +37,7 @@ tutorials = [
     "sentence-transformers>=3.0.0",
     "datasets>=2.0.0",
 ]
-dev = ["pytest", "granite-switch[hf,vllm,compose]"]
+dev = ["pytest", "granite-switch[hf,vllm,compose,onnx]"]
 dev-vllm20 = ["pytest", "granite-switch[hf,vllm20,compose]"]
 test = ["pytest", "bitsandbytes", "optimum-quanto"]
 

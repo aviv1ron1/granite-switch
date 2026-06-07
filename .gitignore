@@ -55,3 +55,7 @@ htmlcov/
 docs/KV_CACHE_OVERHEAD_REMOVAL.md
 docs/KV_CACHE_OVERHEAD_REMOVAL.html
 docs/KV_CACHE_OVERHEAD_REMOVAL*.html
+# Node.js (web/ browser runtime)
+node_modules/
+# Generated ONNX fixtures for the web/ demo (regenerable via granite_switch.onnx.export)
+web/example/model/

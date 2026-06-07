@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Granite Switch — in-browser (ONNX Runtime Web)</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    textarea, pre { width: 100%; box-sizing: border-box; }
+    pre { background: #f4f4f5; padding: .75rem; border-radius: 6px; white-space: pre-wrap; }
+    button { padding: .5rem 1rem; font-size: 14px; }
+    .muted { color: #71717a; }
+  </style>
+</head>
+<body>
+  <h1>Granite Switch — running in your browser</h1>
+  <p class="muted">
+    The full Granite Switch forward (per-token adapter switching + LoRA + base
+    decoder) baked into ONNX graphs, executed client-side via ONNX Runtime Web.
+    No server, no transformers.js pipeline — raw <code>onnxruntime-web</code>.
+  </p>
+
+  <p>Prompt token ids (space-separated; <code>250</code> is an adapter control token):</p>
+  <textarea id="prompt" rows="2">50 51 250 52</textarea>
+  <p><button id="run">Generate</button> <span id="status" class="muted"></span></p>
+  <pre id="out"></pre>
+
+  <script type="module">
+    import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.webgpu.min.mjs";
+    import { GraniteSwitch } from "../src/granite-switch.js";
+
+    const $ = (id) => document.getElementById(id);
+    const status = (s) => ($("status").textContent = s);
+
+    let gs = null;
+    async function ensureLoaded() {
+      if (gs) return gs;
+      status("loading model…");
+      const meta = await (await fetch("./model/gs_onnx.json")).json();
+      gs = await GraniteSwitch.load(ort, {
+        prefillPath: "./model/prefill.onnx",
+        decodePath: "./model/decode.onnx",
+        meta,
+        executionProviders: ["webgpu", "wasm"],
+      });
+      status("model ready.");
+      return gs;
+    }
+
+    $("run").addEventListener("click", async () => {
+      try {
+        const m = await ensureLoaded();
+        const prompt = $("prompt").value.trim().split(/\s+/).map(Number);
+        status("generating…");
+        const tokens = await m.generate(prompt, 8);
+        $("out").textContent = "tokens: " + tokens.join(" ");
+        status("done.");
+      } catch (e) {
+        status("error: " + e.message);
+        console.error(e);
+      }
+    });
+  </script>
+</body>
+</html>

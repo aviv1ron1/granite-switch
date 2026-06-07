@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Granite Switch — ON transformers.js</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    textarea, pre { width: 100%; box-sizing: border-box; }
+    pre { background: #f4f4f5; padding: .75rem; border-radius: 6px; white-space: pre-wrap; }
+    button { padding: .5rem 1rem; }
+    .muted { color: #71717a; }
+  </style>
+</head>
+<body>
+  <h1>Granite Switch — loaded ON transformers.js</h1>
+  <p class="muted">
+    Loaded via <code>@huggingface/transformers</code>'s
+    <code>AutoModelForCausalLM.from_pretrained</code> — transformers.js creates and
+    owns the ONNX session. The switch's per-token adapter state is threaded by our
+    decode loop over that transformers.js-owned session.
+  </p>
+
+  <p>Prompt token ids (<code>250</code> is an adapter control token):</p>
+  <textarea id="prompt" rows="2">50 51 250 52</textarea>
+  <p><button id="run">Generate</button> <span id="status" class="muted"></span></p>
+  <pre id="out"></pre>
+
+  <script type="module">
+    import { env, AutoModelForCausalLM, Tensor }
+      from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js";
+
+    const $ = (id) => document.getElementById(id);
+    const status = (s) => ($("status").textContent = s);
+
+    let model = null, meta = null;
+    async function ensureLoaded() {
+      if (model) return;
+      status("loading via transformers.js…");
+      meta = await (await fetch("./model/tfjs/gs_onnx.json")).json();
+      env.allowLocalModels = true;
+      env.allowRemoteModels = false;
+      env.localModelPath = "./model/";          // models resolved under ./model/<name>
+      model = await AutoModelForCausalLM.from_pretrained("tfjs", { dtype: "fp32" });
+      status("loaded ON transformers.js: " + model.constructor.name);
+    }
+
+    function argmax(a){let b=0,bv=-Infinity;for(let i=0;i<a.length;i++)if(a[i]>bv){bv=a[i];b=i;}return b;}
+
+    async function generate(promptIds, maxNew=8) {
+      const s = model.sessions.model;
+      const L = meta.n_layers, kvh = meta.kv_heads, hd = meta.head_dim;
+      let sk0=new Float32Array(0), sv0=new Float32Array(0);
+      let pk=Array.from({length:L},()=>new Float32Array(0));
+      let pv=Array.from({length:L},()=>new Float32Array(0));
+      let plen=0; const toks=[...promptIds]; let last=null;
+      const step=async(tok)=>{
+        const feed={
+          input_ids:new Tensor("int64",BigInt64Array.from([BigInt(tok)]),[1,1]),
+          past_switch_key0:new Tensor("float32",sk0,[1,plen]),
+          past_switch_val0:new Tensor("float32",sv0,[1,plen]),
+        };
+        for(let li=0;li<L;li++){
+          feed[`past_key.${li}`]=new Tensor("float32",pk[li],[1,kvh,plen,hd]);
+          feed[`past_value.${li}`]=new Tensor("float32",pv[li],[1,kvh,plen,hd]);
+        }
+        const out=await s.run(Object.fromEntries(Object.entries(feed).map(([k,v])=>[k,v.ort_tensor])));
+        sk0=out.present_switch_key0.data; sv0=out.present_switch_val0.data;
+        for(let li=0;li<L;li++){pk[li]=out[`present_key.${li}`].data; pv[li]=out[`present_value.${li}`].data;}
+        plen+=1; return out.logits.data;
+      };
+      for(const t of promptIds) last=await step(t);
+      for(let i=0;i<maxNew;i++){const n=argmax(last);toks.push(n);last=await step(n);}
+      return toks;
+    }
+
+    $("run").addEventListener("click", async () => {
+      try {
+        await ensureLoaded();
+        const prompt = $("prompt").value.trim().split(/\s+/).map(Number);
+        status("generating…");
+        const tokens = await generate(prompt, 8);
+        $("out").textContent = "tokens: " + tokens.join(" ");
+        status("done (ran ON transformers.js).");
+      } catch (e) {
+        status("error: " + e.message);
+        console.error(e);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Granite Switch — from HF Hub, on transformers.js</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    textarea, pre { width: 100%; box-sizing: border-box; }
+    pre { background: #f4f4f5; padding: .75rem; border-radius: 6px; white-space: pre-wrap; }
+    button { padding: .5rem 1rem; }
+    label { display: inline-block; }
+    input[type=text] { width: 22rem; }
+    .muted { color: #71717a; }
+    .row { margin: .4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Granite Switch — loaded from the HF Hub, ON transformers.js</h1>
+  <p class="muted">
+    Loads a packaged Granite Switch ONNX model directly from a Hugging Face repo
+    via <code>@huggingface/transformers</code>'s
+    <code>AutoModelForCausalLM.from_pretrained(repoId)</code>. transformers.js
+    fetches <code>config.json</code> + <code>onnx/model_&lt;dtype&gt;.onnx</code>
+    and owns the session; our loop threads the switch's per-token adapter state.
+  </p>
+
+  <div class="row">
+    <label>HF repo id: <input id="repo" type="text" value="your-org/granite-switch-4.1-3b-onnx-web" /></label>
+  </div>
+  <div class="row">
+    <label>dtype:
+      <select id="dtype">
+        <option value="int8" selected>int8 (verified, ~6 GB)</option>
+        <option value="fp32">fp32 (exact, ~16 GB)</option>
+        <option value="q4">q4 (smallest, lossy — may diverge)</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>prompt token ids:
+      <input id="prompt" type="text" value="10 20 30 100352 40" /></label>
+    <span class="muted">(100352 = citations control token)</span>
+  </div>
+  <p><button id="run">Load &amp; generate</button> <span id="status" class="muted"></span></p>
+  <pre id="out"></pre>
+
+  <script type="module">
+    import { env, AutoModelForCausalLM, Tensor }
+      from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js";
+
+    const $ = (id) => document.getElementById(id);
+    const status = (s) => ($("status").textContent = s);
+
+    let gs = null, loadedKey = null;
+
+    // Inline the switch-state-threading loop (same logic as
+    // web/src/granite-switch-tfjs.js) so this page is self-contained.
+    function argmax(a){let b=0,bv=-Infinity;for(let i=0;i<a.length;i++)if(a[i]>bv){bv=a[i];b=i;}return b;}
+
+    async function load(repoId, dtype) {
+      status(`fetching gs_onnx.json from ${repoId}…`);
+      const metaUrl = `https://huggingface.co/${repoId}/resolve/main/gs_onnx.json`;
+      const meta = await (await fetch(metaUrl)).json();
+      status(`loading ${dtype} via transformers.js (this downloads the weights)…`);
+      env.allowRemoteModels = true;
+      env.allowLocalModels = false;
+      const model = await AutoModelForCausalLM.from_pretrained(repoId, { dtype });
+      status("loaded ON transformers.js: " + model.constructor.name);
+      return { model, session: model.sessions.model, meta };
+    }
+
+    async function generate(ctx, promptIds, maxNew = 8) {
+      const { session: s, meta } = ctx;
+      const L = meta.n_layers, kvh = meta.kv_heads, hd = meta.head_dim;
+      let sk0 = new Float32Array(0), sv0 = new Float32Array(0);
+      let pk = Array.from({ length: L }, () => new Float32Array(0));
+      let pv = Array.from({ length: L }, () => new Float32Array(0));
+      let plen = 0; const toks = [...promptIds]; let last = null;
+      const step = async (tok) => {
+        const feed = {
+          input_ids: new Tensor("int64", BigInt64Array.from([BigInt(tok)]), [1, 1]),
+          past_switch_key0: new Tensor("float32", sk0, [1, plen]),
+          past_switch_val0: new Tensor("float32", sv0, [1, plen]),
+        };
+        for (let li = 0; li < L; li++) {
+          feed[`past_key.${li}`] = new Tensor("float32", pk[li], [1, kvh, plen, hd]);
+          feed[`past_value.${li}`] = new Tensor("float32", pv[li], [1, kvh, plen, hd]);
+        }
+        const out = await s.run(Object.fromEntries(
+          Object.entries(feed).map(([k, v]) => [k, v.ort_tensor])));
+        sk0 = out.present_switch_key0.data; sv0 = out.present_switch_val0.data;
+        for (let li = 0; li < L; li++) {
+          pk[li] = out[`present_key.${li}`].data; pv[li] = out[`present_value.${li}`].data;
+        }
+        plen += 1; return out.logits.data;
+      };
+      for (const t of promptIds) last = await step(t);
+      for (let i = 0; i < maxNew; i++) { const n = argmax(last); toks.push(n); last = await step(n); }
+      return toks;
+    }
+
+    $("run").addEventListener("click", async () => {
+      try {
+        const repoId = $("repo").value.trim();
+        const dtype = $("dtype").value;
+        const key = repoId + "|" + dtype;
+        if (!gs || loadedKey !== key) { gs = await load(repoId, dtype); loadedKey = key; }
+        const prompt = $("prompt").value.trim().split(/\s+/).map(Number);
+        status("generating…");
+        const tokens = await generate(gs, prompt, 12);
+        $("out").textContent = "tokens: " + tokens.join(" ");
+        status("done (loaded from HF Hub, ran ON transformers.js).");
+      } catch (e) {
+        status("error: " + e.message);
+        console.error(e);
+      }
+    });
+  </script>
+</body>
+</html>
