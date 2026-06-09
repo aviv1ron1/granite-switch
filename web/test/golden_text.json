@@ -1,19 +1,24 @@
 {
   "text": "The adversary used spearphishing emails with malicious attachments to gain initial access to the victim network.",
-  "max_new_tokens": 12,
-  "output": "Protection\nassistantProtection\n<tool_call>assistant",
+  "instruction": "What ATT&CK technique does the following CTI procedure sentence describe?",
+  "max_new_tokens": 16,
+  "output": "T1105\n\n\n\n\n\nverification",
   "output_ids": [
-    80098,
+    51,
+    5120,
+    20,
     100257,
     198,
-    100264,
-    78191,
-    100265,
-    80098,
     100257,
     198,
-    100270,
-    78191,
-    100265
+    100257,
+    198,
+    100257,
+    198,
+    100257,
+    198,
+    100257,
+    198,
+    51732
   ]
 }

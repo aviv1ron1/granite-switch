@@ -94,9 +94,14 @@
         if (!gs || loadedBase !== repoBase) { await load(repoBase); loadedBase = repoBase; }
         const text = $("text").value.trim();
         status("encoding + generating…");
-        const ids = tok.encode(text);
+        // The CTI adapter expects the Space's prompt framing: an instruction
+        // line + the sentence wrapped in <cti>…</cti>. Without it the control
+        // token still fires but the model returns garbage instead of a technique
+        // id. See barha/granite-switch-tiny Space.
+        const instruction = "What ATT&CK technique does the following CTI procedure sentence describe?";
+        const ids = tok.encode(text, { instruction });
         const ctrl = gs.meta.adapter_token_ids[0];
-        const outIds = await gs.generate(ids, 12);
+        const outIds = await gs.generate(ids, 16);
         const decoded = tok.decode(outIds.slice(ids.length));
         $("out").textContent =
           `control token ${ctrl} in prompt: ${ids.includes(ctrl)}\n` +
