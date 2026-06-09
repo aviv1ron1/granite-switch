@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Granite Switch in a real browser tab via RAW onnxruntime-web, using the
+     externalData session option to load the fp32 weights sidecar, plus the JS
+     tokenizer + chat template. Text in (CTI sentence) -> technique-id text out.
+
+     Serve a packaged repo dir (granite_switch.onnx.package output) and point
+     `repoBase` at it. The repo provides:
+       gs_onnx.json, chat_template.jinja, tokenizer files,
+       onnx/model.onnx + onnx/model.onnx.data (fp32 decode graph + weights). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Granite Switch — onnxruntime-web (fp32, text I/O)</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    textarea, pre { width: 100%; box-sizing: border-box; }
+    pre { background: #f4f4f5; padding: .75rem; border-radius: 6px; white-space: pre-wrap; }
+    button { padding: .5rem 1rem; }
+    .muted { color: #71717a; } .ok { color: #15803d; font-weight: 700; } .bad { color: #b91c1c; font-weight: 700; }
+    label { display:block; margin:.4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Granite Switch — running in your browser (fp32, real text I/O)</h1>
+  <p class="muted">
+    Raw <code>onnxruntime-web</code> loads the fp32 decode graph + its
+    <code>.onnx.data</code> weights sidecar via the <code>externalData</code>
+    session option; the JS tokenizer + chat template turn your text into tokens
+    (firing the adapter control token) and back. No server inference.
+  </p>
+
+  <label>repo base URL:
+    <input id="repo" type="text" value="./repo" size="48" />
+  </label>
+  <label>CTI text:
+    <textarea id="text" rows="2">The adversary used spearphishing emails with malicious attachments to gain initial access to the victim network.</textarea>
+  </label>
+  <p><button id="run">Load &amp; classify</button> <span id="status" class="muted">idle</span></p>
+  <pre id="out"></pre>
+
+  <!-- Resolve the bare "@huggingface/transformers" specifier used by
+       granite-switch-tokenizer.js to the CDN ESM bundle. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0/dist/ort.webgpu.min.mjs";
+    import { GraniteSwitch } from "../src/granite-switch.js";
+    import { GraniteSwitchTokenizer } from "../src/granite-switch-tokenizer.js";
+
+    const $ = (id) => document.getElementById(id);
+    const status = (s, c) => { $("status").textContent = s; $("status").className = c || "muted"; };
+
+    let gs = null, tok = null, loadedBase = null;
+
+    async function load(repoBase) {
+      status("fetching metadata + chat template…");
+      const meta = await (await fetch(`${repoBase}/gs_onnx.json`)).json();
+      const chatTemplate = await (await fetch(`${repoBase}/chat_template.jinja`)).text();
+
+      status("loading fp32 decode graph + weights sidecar (onnxruntime-web)…");
+      ort.env.wasm.numThreads = self.crossOriginIsolated ? 4 : 1;
+      gs = await GraniteSwitch.load(ort, {
+        decodePath: `${repoBase}/onnx/model.onnx`,
+        prefillPath: null,                 // generate() replays prompt through decode
+        meta,
+        executionProviders: ["wasm"],      // most portable; webgpu also works
+        fetchExternalData: true,           // <-- fetch onnx/model.onnx.data and mount it
+        externalDataBaseUrl: `${repoBase}/onnx`,
+      });
+
+      status("loading tokenizer…");
+      tok = await GraniteSwitchTokenizer.load({
+        modelId: undefined,
+        localModelPath: repoBase.replace(/\/[^/]*$/, "/"),
+        modelName: repoBase.split("/").pop(),
+        chatTemplateText: chatTemplate,
+        meta,
+      });
+      return { meta };
+    }
+
+    $("run").addEventListener("click", async () => {
+      try {
+        const repoBase = $("repo").value.trim().replace(/\/$/, "");
+        if (!gs || loadedBase !== repoBase) { await load(repoBase); loadedBase = repoBase; }
+        const text = $("text").value.trim();
+        status("encoding + generating…");
+        const ids = tok.encode(text);
+        const ctrl = gs.meta.adapter_token_ids[0];
+        const outIds = await gs.generate(ids, 12);
+        const decoded = tok.decode(outIds.slice(ids.length));
+        $("out").textContent =
+          `control token ${ctrl} in prompt: ${ids.includes(ctrl)}\n` +
+          `output text: ${JSON.stringify(decoded)}`;
+        const match = ids.includes(ctrl) && decoded.length > 0;
+        status(match ? "BROWSER_MATCH ✅ ran in tab (text I/O via onnxruntime-web)" : "BROWSER_MISMATCH ❌",
+               match ? "ok" : "bad");
+        window.__RESULT__ = { match, text: decoded, ctrlPresent: ids.includes(ctrl) };
+      } catch (e) {
+        status("error: " + (e && e.message ? e.message : e), "bad");
+        window.__RESULT__ = { error: String(e && e.message ? e.message : e) };
+        console.error(e);
+      }
+    });
+  </script>
+</body>
+</html>
