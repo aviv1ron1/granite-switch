@@ -17,7 +17,7 @@
 // pulled into a browser bundle). Read it from the repo's chat_template.jinja in
 // Node, or fetch() it in the browser.
 
-import { env, AutoTokenizer } from "@huggingface/transformers";
+import { env as defaultEnv, AutoTokenizer as DefaultAutoTokenizer } from "@huggingface/transformers";
 
 export class GraniteSwitchTokenizer {
   constructor(tokenizer, chatTemplate, meta) {
@@ -38,8 +38,16 @@ export class GraniteSwitchTokenizer {
    * @param {string} [opts.modelName]       subdir under localModelPath (local load)
    * @param {string} opts.chatTemplateText  contents of chat_template.jinja
    * @param {object} [opts.meta]            gs_onnx.json metadata (for adapter names)
+   * @param {object} [opts.AutoTokenizer]  transformers.js AutoTokenizer to use
+   *   (default: the package-root import). Pass the SAME instance the model uses
+   *   when the app is bound to transformers.js's `src/` tree (e.g. via the native
+   *   shim), so tokenizer + model share one `env`/module instance.
+   * @param {object} [opts.env]            matching transformers.js `env` object.
    */
-  static async load({ modelId, localModelPath, modelName, chatTemplateText, meta }) {
+  static async load({
+    modelId, localModelPath, modelName, chatTemplateText, meta,
+    AutoTokenizer = DefaultAutoTokenizer, env = defaultEnv,
+  }) {
     // Avoid serving a STALE tokenizer from transformers.js' browser cache
     // (Cache Storage `transformers-cache`). When a model is re-exported under
     // the same name, a previously cached tokenizer is otherwise returned — e.g.
@@ -79,8 +87,10 @@ export class GraniteSwitchTokenizer {
    *
    * @param {string} text  the CTI sentence (or raw user content if no instruction)
    * @param {object} [opts]
-   * @param {string} [opts.adapterName]  adapter to activate; defaults to the
-   *                                     first adapter in meta.adapter_names
+   * @param {string|null} [opts.adapterName]  adapter to activate; defaults to the
+   *                                     first adapter in meta.adapter_names. Pass
+   *                                     `null` EXPLICITLY to render WITHOUT firing
+   *                                     any control token (the plain base model).
    * @param {string} [opts.instruction]  instruction line; when set, the user
    *                                     content becomes
    *                                     `${instruction}\n\n<cti>\n${text}\n</cti>`
@@ -88,7 +98,11 @@ export class GraniteSwitchTokenizer {
    * @returns {number[]} token ids
    */
   encode(text, { adapterName, instruction, addGenerationPrompt = true } = {}) {
-    const adapter = adapterName || (this.meta.adapter_names && this.meta.adapter_names[0]);
+    // `adapterName: null` (explicit) => base model, no control token. `undefined`
+    // => default to the first adapter. A truthy string => that adapter.
+    const adapter = adapterName === null
+      ? undefined
+      : adapterName || (this.meta.adapter_names && this.meta.adapter_names[0]);
     const content = instruction ? `${instruction}\n\n<cti>\n${text}\n</cti>` : text;
     const rendered = this.tok.apply_chat_template(
       [{ role: "user", content }],

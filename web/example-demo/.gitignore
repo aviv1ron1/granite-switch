@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Local model artifacts served for dev (large ONNX + sidecar). For a real deploy,
+# point VITE_REPO_BASE at an HF Hub resolve URL instead of bundling weights.
+public/repo/

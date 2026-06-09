@@ -27,8 +27,18 @@ OPSET = 18  # dynamo exporter; lowest opset with the ops the switch/LoRA path ne
 
 # ONNX serializes to protobuf, which caps a single message at 2 GiB. A model
 # whose initializers approach that limit cannot embed its weights inline and
-# MUST keep them in an external ``.onnx.data`` sidecar. We embed only when the
-# whole thing fits comfortably under the cap (browser-simple, single file).
+# MUST keep them in an external ``.onnx.data`` sidecar. The top-level
+# ``prefill.onnx`` / ``decode.onnx`` embed when the whole thing fits comfortably
+# under the cap (one file, convenient for onnxruntime / onnxruntime-node, which
+# resolve a sidecar automatically anyway).
+#
+# NOTE: embedding is NOT the right choice for the browser. onnxruntime-web (WASM)
+# aborts when asked to parse a multi-hundred-MB inline ``.onnx`` (the whole
+# protobuf is materialized in the WASM heap). The browser instead loads the
+# ``tfjs/`` artifacts, which are ALWAYS kept external (graph + ``.onnx.data``
+# sidecar) and handed to ORT-web via the ``externalData`` session option (see the
+# ``web/`` runtime). So the embed threshold below governs only the top-level
+# files, never the browser path.
 _PROTOBUF_LIMIT = 2 * 1024**3
 _EMBED_THRESHOLD = int(1.8 * 1024**3)  # headroom below the 2 GiB protobuf cap
 
@@ -43,10 +53,14 @@ def _embed_external_data(onnx_path):
     """Fold weights back into a single ``.onnx`` file (no external sidecar).
 
     The dynamo exporter writes large initializers to a sidecar ``*.onnx.data``
-    file. ``onnxruntime-web`` (WASM) cannot resolve that sidecar by default
-    ("Module.MountedFiles is not available"), so for small models we fold the
-    weights back into the single ``.onnx`` file for a one-file browser load.
-    Large models (> ~2 GiB) cannot do this — see :func:`_keep_external_data`.
+    file. For the top-level ``prefill.onnx`` / ``decode.onnx`` of small models we
+    fold the weights back into one ``.onnx`` file for a convenient single-file
+    artifact (``onnxruntime`` / ``onnxruntime-node`` load it directly).
+
+    This is for Node/Python convenience only — do NOT use the embedded file in
+    the browser: onnxruntime-web aborts parsing a large inline protobuf. The
+    browser loads the always-external ``tfjs/`` artifacts instead.
+    Large models (> ~2 GiB) cannot embed at all — see :func:`_keep_external_data`.
     """
     import onnx
 
@@ -128,6 +142,33 @@ def _finalize_onnx(onnx_path, *, embed):
     return _keep_external_data(onnx_path)
 
 
+def _save_external_copy(src_onnx, dst_onnx):
+    """Copy a graph to ``dst_onnx`` with weights ALWAYS external.
+
+    The destination references a sidecar named ``<basename(dst_onnx)>.data``
+    (e.g. ``model.onnx`` -> ``model.onnx.data``). Works whether the source has
+    weights inline or in its own sidecar. This is the browser-loadable form:
+    onnxruntime-web is handed the sidecar bytes via the ``externalData`` session
+    option (the ``web/`` runtime), which it CAN resolve — unlike a large inline
+    ``.onnx``, which it aborts on. Returns the sidecar basename.
+    """
+    import onnx
+
+    m = onnx.load(src_onnx, load_external_data=True)
+    for tensor in m.graph.initializer:
+        if tensor.HasField("data_location") and tensor.data_location == onnx.TensorProto.EXTERNAL:
+            tensor.ClearField("external_data")
+            tensor.data_location = onnx.TensorProto.DEFAULT
+    sidecar_name = os.path.basename(dst_onnx) + ".data"
+    os.makedirs(os.path.dirname(dst_onnx) or ".", exist_ok=True)
+    onnx.save(
+        m, dst_onnx,
+        save_as_external_data=True, all_tensors_to_one_file=True,
+        location=sidecar_name, size_threshold=1024, convert_attribute=False,
+    )
+    return sidecar_name
+
+
 def export_prefill(model, output_path, *, example_input_ids, opset=OPSET, embed=True):
     """Export the no-cache prefill graph (``input_ids -> logits``).
 
@@ -199,10 +240,15 @@ def _param_bytes(model):
 def export_model_dir(model, out_dir, *, opset=OPSET, embed=None):
     """Export prefill + decode graphs and metadata into ``out_dir``.
 
-    ``embed`` controls whether weights are folded inline (one ``.onnx`` file) or
-    kept in an external ``.onnx.data`` sidecar. ``None`` (default) auto-selects:
-    embed when the model fits under the ~2 GiB protobuf cap, otherwise keep the
-    sidecar (required for large models like the 4 B granite-switch-4.1-3b).
+    ``embed`` controls whether the TOP-LEVEL ``prefill.onnx`` / ``decode.onnx``
+    fold weights inline (one ``.onnx`` file) or keep an external ``.onnx.data``
+    sidecar. ``None`` (default) auto-selects: embed when the model fits under the
+    ~2 GiB protobuf cap, otherwise keep the sidecar (required for large models
+    like the 4 B granite-switch-4.1-3b).
+
+    Regardless of ``embed``, the ``tfjs/`` browser artifacts are ALWAYS written
+    external (graph + ``.onnx.data`` sidecar): onnxruntime-web aborts on a large
+    inline ``.onnx``, but resolves a sidecar via its ``externalData`` option.
     """
     os.makedirs(out_dir, exist_ok=True)
     cfg = model.config
@@ -233,13 +279,11 @@ def export_model_dir(model, out_dir, *, opset=OPSET, embed=None):
         "adapter_token_ids": list(getattr(cfg, "adapter_token_ids", []) or []),
         "adapter_names": list(getattr(cfg, "adapter_names", []) or []),
         "logits_scaling": getattr(cfg, "logits_scaling", 1.0),
-        "external_data": not embed,  # True => weights live in a .onnx.data sidecar
+        "external_data": not embed,  # True => top-level weights live in a .onnx.data sidecar
     }
-    with open(os.path.join(out_dir, "gs_onnx.json"), "w") as f:
-        json.dump(meta, f, indent=2)
 
-    # Also emit a transformers.js-loadable layout under <out>/tfjs/ so the model
-    # can be loaded ON transformers.js via AutoModelForCausalLM.from_pretrained.
+    # Emit a transformers.js-loadable layout under <out>/tfjs/ so the model can be
+    # loaded ON transformers.js via AutoModelForCausalLM.from_pretrained.
     #
     # transformers.js has no custom-architecture API and rejects
     # `model_type: granite_switch` ("Unsupported model type"). So the tfjs config
@@ -248,7 +292,13 @@ def export_model_dir(model, out_dir, *, opset=OPSET, embed=None):
     # The decode graph is placed at onnx/model.onnx (transformers.js's default
     # decoder session file). Granite Switch's own runtime metadata stays in
     # gs_onnx.json (copied alongside) for the switch-state-threading decode loop.
-    import shutil
+    #
+    # The tfjs graphs are ALWAYS external (graph + .onnx.data sidecar), regardless
+    # of `embed`: this is the browser-loadable form. onnxruntime-web aborts on a
+    # large inline .onnx, but resolves the sidecar when handed its bytes via the
+    # `externalData` session option (see web/src/granite-switch.js). The browser
+    # loads the decode graph for inference; the prefill copy is emitted for
+    # symmetry (the JS runtime can optionally load it too).
     tfjs_dir = os.path.join(out_dir, "tfjs")
     os.makedirs(os.path.join(tfjs_dir, "onnx"), exist_ok=True)
     hidden = kv_heads * head_dim
@@ -266,26 +316,26 @@ def export_model_dir(model, out_dir, *, opset=OPSET, embed=None):
     with open(os.path.join(tfjs_dir, "config.json"), "w") as f:
         json.dump(tfjs_config, f, indent=2)
 
-    tfjs_model = os.path.join(tfjs_dir, "onnx", "model.onnx")
-    decode_path = os.path.join(out_dir, "decode.onnx")
-    if embed:
-        # Single self-contained file; a plain copy is correct.
-        shutil.copy(decode_path, tfjs_model)
-    else:
-        # The decode graph references "decode.onnx.data"; the tfjs copy lives at
-        # onnx/model.onnx and must reference "model.onnx.data". Re-save under the
-        # new name so transformers.js / onnxruntime-web resolves the sidecar.
-        import onnx
-        m = onnx.load(decode_path, load_external_data=True)
-        for tensor in m.graph.initializer:
-            if tensor.HasField("data_location") and tensor.data_location == onnx.TensorProto.EXTERNAL:
-                tensor.ClearField("external_data")
-                tensor.data_location = onnx.TensorProto.DEFAULT
-        onnx.save(
-            m, tfjs_model,
-            save_as_external_data=True, all_tensors_to_one_file=True,
-            location="model.onnx.data", size_threshold=1024, convert_attribute=False,
-        )
+    # decode graph -> onnx/model.onnx (transformers.js default decoder file).
+    decode_sidecar = _save_external_copy(
+        os.path.join(out_dir, "decode.onnx"),
+        os.path.join(tfjs_dir, "onnx", "model.onnx"))
+    # prefill graph -> onnx/prefill.onnx (loaded for symmetry; unused by generate).
+    prefill_sidecar = _save_external_copy(
+        os.path.join(out_dir, "prefill.onnx"),
+        os.path.join(tfjs_dir, "onnx", "prefill.onnx"))
+
+    # Browser-load hints: which tfjs artifacts the JS runtime should fetch, and
+    # their external-data sidecar names (the basenames baked into each graph's
+    # `location`, which the `externalData` session option must match).
+    meta["browser_decode"] = "tfjs/onnx/model.onnx"
+    meta["browser_decode_external_data"] = decode_sidecar
+    meta["browser_prefill"] = "tfjs/onnx/prefill.onnx"
+    meta["browser_prefill_external_data"] = prefill_sidecar
+
+    with open(os.path.join(out_dir, "gs_onnx.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    import shutil
     shutil.copy(os.path.join(out_dir, "gs_onnx.json"),
                 os.path.join(tfjs_dir, "gs_onnx.json"))
     return out_dir

@@ -13,21 +13,95 @@
 //
 // The runtime is engine-agnostic: pass in an `ort` module (onnxruntime-web in a
 // browser, onnxruntime-node in Node) so the same code validates headlessly.
+//
+// External-data (weights) sidecars: large graphs keep their weights in a
+// `<name>.onnx.data` file alongside the `.onnx` graph. onnxruntime-node resolves
+// such a sidecar automatically from disk, but onnxruntime-web (WASM) does NOT —
+// it must be handed the bytes explicitly via the `externalData` session option.
+// `load()` therefore accepts pre-fetched buffers (`prefillData`/`decodeData`) or
+// a `fetchExternalData` flag that fetches the sidecar in the browser. The `path`
+// in the externalData entry MUST equal the sidecar basename baked into the
+// graph's `location` (i.e. `<basename(onnxPath)>.data`), or ORT silently fails to
+// mount the weights and aborts in WASM.
+
+function _sidecarName(onnxPath) {
+  const base = onnxPath.split(/[\\/]/).pop();
+  return base + ".data"; // e.g. decode.onnx -> decode.onnx.data
+}
+
+function _dirOf(p) {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(0, i) : ".";
+}
+
+function _toU8(data) {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return new Uint8Array(data);
+}
 
 export class GraniteSwitch {
   constructor(ort, prefillSession, decodeSession, meta) {
     this.ort = ort;
-    this.prefill = prefillSession;
+    this.prefill = prefillSession; // may be null — generate() never uses it
     this.decode = decodeSession;
     this.meta = meta;
   }
 
+  // Resolve the externalData session option for one graph, or null. `explicit`
+  // is a pre-fetched buffer (preferred — works in Node and browser); otherwise,
+  // when `fetchExternalData` is set and a global `fetch` exists, fetch the
+  // sidecar from `${externalDataBaseUrl || dirOf(onnxPath)}/${sidecarName}`.
+  static async _externalDataOpt(onnxPath, { explicit, fetchExternalData, externalDataBaseUrl }) {
+    const sidecar = _sidecarName(onnxPath);
+    if (explicit != null) return [{ path: sidecar, data: _toU8(explicit) }];
+    if (fetchExternalData && typeof fetch === "function") {
+      const url = `${externalDataBaseUrl || _dirOf(onnxPath)}/${sidecar}`;
+      const buf = await (await fetch(url)).arrayBuffer();
+      return [{ path: sidecar, data: new Uint8Array(buf) }];
+    }
+    return null;
+  }
+
   // executionProviders defaults to onnxruntime-web's: ["webgpu","wasm"].
   // For onnxruntime-node, pass ["cpu"].
-  static async load(ort, { prefillPath, decodePath, meta, executionProviders }) {
-    const opts = { executionProviders: executionProviders || ["webgpu", "wasm"] };
-    const prefill = await ort.InferenceSession.create(prefillPath, opts);
-    const decode = await ort.InferenceSession.create(decodePath, opts);
+  //
+  // External-data opts (all optional, backward compatible):
+  //   prefillData / decodeData : pre-fetched sidecar bytes (ArrayBuffer/Uint8Array)
+  //   fetchExternalData        : fetch each graph's .onnx.data in the browser
+  //   externalDataBaseUrl      : base URL/dir for that fetch (default: graph's dir)
+  //
+  // A falsy `prefillPath` is allowed (browser may load decode-only); a prefill
+  // load failure is tolerated since generate() replays the prompt through decode.
+  static async load(ort, {
+    prefillPath, decodePath, meta, executionProviders,
+    prefillData, decodeData, fetchExternalData, externalDataBaseUrl,
+  }) {
+    const eps = executionProviders || ["webgpu", "wasm"];
+
+    const decodeExt = await this._externalDataOpt(decodePath, {
+      explicit: decodeData, fetchExternalData, externalDataBaseUrl,
+    });
+    const decodeOpts = { executionProviders: eps };
+    if (decodeExt) decodeOpts.externalData = decodeExt;
+    const decode = await ort.InferenceSession.create(decodePath, decodeOpts);
+
+    let prefill = null;
+    if (prefillPath) {
+      try {
+        const prefillExt = await this._externalDataOpt(prefillPath, {
+          explicit: prefillData, fetchExternalData, externalDataBaseUrl,
+        });
+        const prefillOpts = { executionProviders: eps };
+        if (prefillExt) prefillOpts.externalData = prefillExt;
+        prefill = await ort.InferenceSession.create(prefillPath, prefillOpts);
+      } catch (e) {
+        // generate() never uses the prefill graph; a missing/broken prefill
+        // artifact must not block decode-only inference.
+        prefill = null;
+      }
+    }
     return new GraniteSwitch(ort, prefill, decode, meta);
   }
 

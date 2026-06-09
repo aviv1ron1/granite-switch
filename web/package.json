@@ -7,7 +7,10 @@
   "scripts": {
     "validate": "node test/validate_node.mjs",
     "validate:tfjs": "node test/validate_tfjs.mjs",
-    "validate:hub": "node test/validate_hub_repo.mjs"
+    "validate:hub": "node test/validate_hub_repo.mjs",
+    "validate:browser-path": "node test/validate_browser_path_node.mjs",
+    "validate:native": "node --import ./test/hf-src-loader.mjs test/validate_native.mjs",
+    "serve:coi": "python3 test/coi_server.py"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

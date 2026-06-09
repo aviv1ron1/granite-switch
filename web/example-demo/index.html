@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Granite Switch · CTI Technique Mapping</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        max-width: 880px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55;
+      }
+      h1 { font-size: 1.5rem; margin-bottom: .2rem; }
+      .desc { color: #888; font-size: .92rem; }
+      .desc a { color: #6366f1; }
+      textarea { width: 100%; min-height: 5rem; font: inherit; padding: .6rem; box-sizing: border-box; border-radius: 6px; }
+      button { font: inherit; padding: .55rem 1.1rem; cursor: pointer; border-radius: 6px;
+        border: none; background: #6366f1; color: #fff; }
+      button:disabled { opacity: .5; cursor: default; }
+      .examples { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 1rem; }
+      .example { font-size: .82rem; padding: .3rem .6rem; border: 1px solid #8884; border-radius: 999px;
+        background: transparent; color: inherit; cursor: pointer; }
+      .row { display: flex; gap: .6rem; align-items: center; margin: .8rem 0; }
+      .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+      @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+      .card { border: 1px solid #8883; border-radius: 8px; padding: .8rem 1rem; }
+      .card h3 { margin: 0 0 .5rem; font-size: .95rem; }
+      .out { white-space: pre-wrap; word-break: break-word; min-height: 2.5rem; }
+      .out .tid { font-size: 1.3rem; font-weight: 700; font-family: ui-monospace, monospace; }
+      .out .tname { font-size: 1.05rem; }
+      .status { font-size: .85rem; color: #888; min-height: 1.2em; }
+      code { background: #0001; padding: .1rem .3rem; border-radius: 3px; }
+      progress {
+        width: 100%; height: .7rem; appearance: none; -webkit-appearance: none;
+        border: none; border-radius: 999px; overflow: hidden; background: #0001;
+      }
+      progress::-webkit-progress-bar { background: #0001; border-radius: 999px; }
+      progress::-webkit-progress-value { background: #6366f1; border-radius: 999px; }
+      progress::-moz-progress-bar { background: #6366f1; border-radius: 999px; }
+      .progress-label { font-size: .8rem; color: #888; margin-top: .25rem; }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>🛡️ Granite Switch 4.0 350M — CTI Technique Mapping</h1>
+    <p class="desc">
+      The <strong>same base model</strong> answers a <strong>cyber threat
+      intelligence (CTI)</strong> prompt two ways. Without the adapter it rambles
+      in prose; flip on the embedded <code>cti-technique-mapping</code> LoRA (via a
+      single control token) and it emits the one matching
+      <a href="https://attack.mitre.org/">MITRE ATT&amp;CK</a> technique ID — which
+      we resolve to its name.
+      <br />
+      Runs <strong>fully client-side</strong> in your browser:
+      <code>AutoModelForCausalLM.from_pretrained</code> loads
+      <a href="https://huggingface.co/barha/granite-switch-4.0-350m-cti-onnx">the ONNX
+      model</a> on transformers.js (native <code>granite_switch</code> architecture).
+      Base: <code>ibm-granite/granite-4.0-350m</code> · Adapter:
+      <code>cti-technique-mapping</code> (LoRA, attention + MLP).
+    </p>
+
+    <div class="progress-wrap" id="progress-wrap">
+      <progress id="progress" value="0" max="100"></progress>
+      <div class="progress-label" id="progress-label">loading model…</div>
+    </div>
+
+    <label for="prompt"><strong>CTI text</strong></label>
+    <textarea id="prompt" placeholder="Describe the observed adversary behavior…">The actor used PowerShell to download and execute a payload from a remote server.</textarea>
+
+    <div class="examples" id="examples"></div>
+
+    <div class="row">
+      <button id="run" disabled>Compare base vs adapter</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>🟡 Base model (adapter OFF)</h3>
+        <div class="out" id="base-out">—</div>
+      </div>
+      <div class="card">
+        <h3>🟢 Granite Switch (adapter ON)</h3>
+        <div class="out" id="adapter-out">—</div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

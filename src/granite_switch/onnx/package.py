@@ -59,14 +59,39 @@ def _copy_onnx_variant(src_onnx, dst_onnx):
         shutil.copy(src_onnx, dst_onnx)
 
 
+def _native_config(meta):
+    """A ``granite_switch``-typed config.json for the NATIVE transformers.js path.
+
+    The Granite Switch web shim (``web/src/granite-switch-register.js``) registers
+    a real ``GraniteSwitchForCausalLM`` architecture, so the repo can declare its
+    true ``model_type`` instead of masquerading as ``gpt2``. ``architectures[0]``
+    matches the registered class name so transformers.js's cross-arch detector
+    (which only fires for ``*ForConditionalGeneration``) is skipped.
+    """
+    kv_heads = meta.get("kv_heads")
+    head_dim = meta.get("head_dim")
+    return {
+        "model_type": "granite_switch",
+        "architectures": ["GraniteSwitchForCausalLM"],
+        "num_hidden_layers": meta.get("n_layers"),
+        "num_attention_heads": kv_heads,
+        "num_key_value_heads": kv_heads,
+        "hidden_size": (kv_heads * head_dim) if (kv_heads and head_dim) else None,
+        "vocab_size": meta.get("vocab_size"),
+    }
+
+
 def package_for_hub(export_dir, repo_dir, *, tokenizer_src=None, model_name="granite-switch",
-                    repo_id=None):
+                    repo_id=None, native=False):
     """Build an upload-ready repo from an ``export_model_dir`` output.
 
     ``export_dir``      directory produced by ``export_model_dir`` (has ``tfjs/``).
     ``repo_dir``        destination repo directory (created/overwritten).
     ``tokenizer_src``   optional path/HF-id to copy tokenizer files from.
     ``repo_id``         optional ``user/name`` used in the README usage snippet.
+    ``native``          when True, write a ``granite_switch``-typed ``config.json``
+                        (loads via the web shim's native ``from_pretrained``)
+                        instead of the legacy ``gpt2``-typed workaround config.
     """
     tfjs = os.path.join(export_dir, "tfjs")
     if not os.path.isdir(tfjs):
@@ -74,10 +99,17 @@ def package_for_hub(export_dir, repo_dir, *, tokenizer_src=None, model_name="gra
 
     os.makedirs(os.path.join(repo_dir, "onnx"), exist_ok=True)
 
-    # config + switch metadata
-    shutil.copy(os.path.join(tfjs, "config.json"), os.path.join(repo_dir, "config.json"))
+    # switch metadata (always copied)
     shutil.copy(os.path.join(tfjs, "gs_onnx.json"), os.path.join(repo_dir, "gs_onnx.json"))
     meta = json.load(open(os.path.join(tfjs, "gs_onnx.json")))
+
+    # config.json: native granite_switch-typed, or the legacy gpt2-typed workaround.
+    if native:
+        cfg = {k: v for k, v in _native_config(meta).items() if v is not None}
+        with open(os.path.join(repo_dir, "config.json"), "w") as f:
+            json.dump(cfg, f, indent=2)
+    else:
+        shutil.copy(os.path.join(tfjs, "config.json"), os.path.join(repo_dir, "config.json"))
 
     # onnx variants (fp32 + any quantized)
     variants = []
@@ -100,7 +132,7 @@ def package_for_hub(export_dir, repo_dir, *, tokenizer_src=None, model_name="gra
                     copied_tok.append(tf)
 
     _write_model_card(repo_dir, model_name=model_name, meta=meta,
-                      variants=variants, tokenizer=copied_tok, repo_id=repo_id)
+                      variants=variants, tokenizer=copied_tok, repo_id=repo_id, native=native)
     return repo_dir
 
 
@@ -115,7 +147,7 @@ def _resolve_tokenizer_dir(src):
         return None
 
 
-def _write_model_card(repo_dir, *, model_name, meta, variants, tokenizer, repo_id):
+def _write_model_card(repo_dir, *, model_name, meta, variants, tokenizer, repo_id, native=False):
     rid = repo_id or "your-org/granite-switch-onnx-web"
     has_int8 = any("_int8" in v for v in variants)
     has_q4 = any("_q4" in v for v in variants)
@@ -127,6 +159,52 @@ def _write_model_card(repo_dir, *, model_name, meta, variants, tokenizer, repo_i
     if has_q4:
         dtype_lines.append('- `q4` — `onnx/model_q4.onnx` (smallest)')
     dtypes = "\n".join(dtype_lines) or "- `fp32`"
+
+    if native:
+        config_section = f"""## Loading (native transformers.js architecture)
+
+This repo declares its true `model_type: granite_switch`. The Granite Switch web
+runtime ships a **self-registering shim** that teaches transformers.js the
+`GraniteSwitchForCausalLM` architecture, so it loads via the standard
+`AutoModelForCausalLM.from_pretrained`. Granite Switch selects adapters via a
+**causal, cumulative** switch attention; the shim's custom forward threads that
+state (`past_switch_key0` / `past_switch_val0`) across decode steps — the generic
+loop alone is not sufficient.
+
+```js
+// import the shim once (registers granite_switch), then use the re-exported API
+import {{ AutoModelForCausalLM, loadGraniteSwitch }} from "granite-switch-web/src/granite-switch-register.js";
+
+// loadGraniteSwitch wires the external-data sidecar (model.onnx.data) for you:
+const gs = await loadGraniteSwitch("{rid}", {{ dtype: "fp32" }});
+const out = await gs.generate({{ inputs, max_new_tokens: 16, do_sample: false }});
+```"""
+    else:
+        config_section = f"""## Why a custom loop is required
+
+`transformers.js` has no built-in custom-architecture API, so this repo presents a
+**supported DecoderOnly `model_type` (`gpt2`)** in `config.json` purely so
+`AutoModelForCausalLM.from_pretrained` will load it and create the ONNX session.
+Granite Switch selects adapters via a **causal, cumulative** switch attention,
+so the generic generation loop is *not* sufficient — the switch's state
+(`past_switch_key0` / `past_switch_val0`) must be threaded across decode steps.
+
+Use the Granite Switch web runtime, which drives the transformers.js-owned
+session with that state threading:
+
+```js
+import {{ env, AutoModelForCausalLM, Tensor }} from "@huggingface/transformers";
+import {{ GraniteSwitchTfjs }} from "granite-switch-web";
+
+const meta = await (await fetch("https://huggingface.co/{rid}/resolve/main/gs_onnx.json")).json();
+env.allowRemoteModels = true;
+const gs = await GraniteSwitchTfjs.load({{
+  localModelPath: "https://huggingface.co/{rid}/resolve/main/",
+  modelName: ".",            // config.json + onnx/ live at the repo root
+  meta,
+}});
+const tokens = await gs.generate([10, 20, 30, /* control token */ , 40], 16);
+```"""
 
     card = f"""---
 library_name: transformers.js
@@ -152,31 +230,7 @@ transformers.js**.
 
 {dtypes}
 
-## Why a custom loop is required
-
-`transformers.js` has no custom-architecture API, so this repo presents a
-**supported DecoderOnly `model_type` (`gpt2`)** in `config.json` purely so
-`AutoModelForCausalLM.from_pretrained` will load it and create the ONNX session.
-Granite Switch selects adapters via a **causal, cumulative** switch attention,
-so the generic generation loop is *not* sufficient — the switch's state
-(`past_switch_key0` / `past_switch_val0`) must be threaded across decode steps.
-
-Use the Granite Switch web runtime, which drives the transformers.js-owned
-session with that state threading:
-
-```js
-import {{ env, AutoModelForCausalLM, Tensor }} from "@huggingface/transformers";
-import {{ GraniteSwitchTfjs }} from "granite-switch-web";
-
-const meta = await (await fetch("https://huggingface.co/{rid}/resolve/main/gs_onnx.json")).json();
-env.allowRemoteModels = true;
-const gs = await GraniteSwitchTfjs.load({{
-  localModelPath: "https://huggingface.co/{rid}/resolve/main/",
-  modelName: ".",            // config.json + onnx/ live at the repo root
-  meta,
-}});
-const tokens = await gs.generate([10, 20, 30, /* control token */ , 40], 16);
-```
+{config_section}
 
 `gs_onnx.json` carries the runtime metadata (layer/head counts, adapter token
 ids) the decode loop needs.
@@ -201,11 +255,15 @@ def main():
                    help="path or HF id to copy tokenizer files from")
     p.add_argument("--model-name", default="granite-switch")
     p.add_argument("--repo-id", default=None, help="user/name for README usage snippet")
+    p.add_argument("--native", action="store_true",
+                   help="write a granite_switch-typed config.json (native transformers.js "
+                        "load via the web shim) instead of the gpt2-typed workaround")
     args = p.parse_args()
 
     out = package_for_hub(args.export_dir, args.repo_dir,
                           tokenizer_src=args.tokenizer_src,
-                          model_name=args.model_name, repo_id=args.repo_id)
+                          model_name=args.model_name, repo_id=args.repo_id,
+                          native=args.native)
     print(f"Packaged upload-ready repo → {out}")
     print("Upload with:  huggingface-cli upload <repo-id> "
           f"{out} . --repo-type model")
