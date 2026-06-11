@@ -159,18 +159,27 @@ Builds wheel + sdist with `uv build`, then uploads with `uv publish`. Uses **PyP
 
 ### Phase 2: Mypy Type Checking
 
-Mypy is deferred because the codebase has no existing `[tool.mypy]` configuration, and retrofitting strict type checking requires adding annotations across the entire codebase — a significant effort worth its own PR.
+Mypy is deferred because the codebase has no existing `[tool.mypy]` configuration and retrofitting type annotations across an existing codebase is a significant effort worth its own PR.
 
-When ready, the approach mirrors SPINE:
+#### Strictness level: curated middle ground (not `--strict`)
+
+`--strict` is the wrong choice here. PyTorch, HuggingFace, and vLLM all have incomplete or missing type stubs — `Any` leaks in from those library boundaries and propagates everywhere, meaning most mypy errors would be fighting stub quality rather than catching real bugs in granite-switch code. SPINE uses `strict = true` because it was designed with types in mind from day one; this codebase is retrofitting.
+
+The recommended config enforces the flags that deliver the highest signal-to-noise ratio:
 
 **`pyproject.toml`:**
 ```toml
 [tool.mypy]
-pretty = true
-strict = true
 python_version = "3.11"
+pretty = true
+ignore_missing_imports = true   # vllm has no stubs; HF stubs are partial
+disallow_untyped_defs = true    # every function must be annotated — highest-value flag
+warn_return_any = true          # catch Any leaking out of our own functions
+warn_unused_ignores = true      # keep # type: ignore comments from going stale
 exclude = ["^tests/"]
 ```
+
+`disallow_untyped_defs` is the core flag: it ensures every function added going forward is annotated, which is where mypy earns its keep. Tighten toward `--strict` incrementally as stub quality improves and the codebase is fully annotated.
 
 **`.pre-commit-config.yaml`** (add to `local` repo block):
 ```yaml
