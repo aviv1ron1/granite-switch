@@ -38,6 +38,20 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         lora_target_modules (List[str]): List of module GROUP names to apply LoRA to.
             Module groups: "qkv_proj", "o_proj", "shared_input_linear", "shared_output_linear".
             Default: all four groups
+
+        Audio (ASR) preprocessing parameters:
+            asr_enabled (bool): When True, the vLLM backend registers an audio
+                multimodal preprocessor that transcribes audio inputs to text and
+                splices the transcript tokens into the prompt before the decoder
+                runs. The decoder itself is unchanged and only ever sees text
+                tokens. Default: False.
+            asr_model_id (Optional[str]): HuggingFace id of the speech-to-text
+                model the preprocessor loads. When None and asr_enabled is True,
+                the backend falls back to a small built-in default. This makes the
+                checkpoint self-describing about which ASR front-end it expects.
+            asr_device (str): Device the ASR model runs on. Default "cpu" keeps
+                vLLM's GPU KV-cache budget clean; set to a CUDA device to trade GPU
+                memory for transcription latency.
         **kwargs: Additional arguments passed to GraniteConfig.
     """
 
@@ -56,6 +70,10 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         max_lora_rank: int = 8,
         adapter_ranks: List[int] = None,
         lora_target_modules: Optional[List[str]] = None,
+        # Audio (ASR) preprocessing parameters
+        asr_enabled: bool = False,
+        asr_model_id: Optional[str] = None,
+        asr_device: str = "cpu",
         # vLLM residual-norm convention (for bit-exact skinning equivalence)
         fused_add_norm: bool = False,
         # Parent class defaults (Granite 4 dense configuration)
@@ -135,6 +153,15 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         self.control_token_gain = control_token_gain
         self.switch_head_dim = switch_head_dim
         self.fused_add_norm = fused_add_norm
+
+        # Audio (ASR) preprocessing parameters.
+        # The decoder is oblivious to audio: when enabled, the vLLM backend's
+        # multimodal preprocessor transcribes audio to text and injects the
+        # transcript tokens into the prompt before embedding. These fields make
+        # the checkpoint self-describing about its ASR front-end.
+        self.asr_enabled = asr_enabled
+        self.asr_model_id = asr_model_id
+        self.asr_device = asr_device
 
         # Adapter names
         self.adapter_names = adapter_names
