@@ -36,11 +36,17 @@ const SCHEMA_PREAMBLE = "\n\nRespond with a JSON object conforming to this schem
 // ── Per-adapter configuration ─────────────────────────────────────────────────
 // `name` MUST equal the adapter name in gs_onnx.json so the right control token
 // fires. `render(raw)` returns { html } (trusted, pre-escaped) or { text }.
+// Each adapter's control token is its name wrapped in `<|…|>` (LoRA adapters; the
+// chat template prepends it at the sequence start). Kept as a function so the cards
+// and the raw-prompt highlight derive the exact spelling from `name`.
+const controlTokenOf = (a) => `<|${a.name}|>`;
+
 const ADAPTERS = [
   {
     name: "cti-technique-mapping",
     label: "CTI → ATT&CK",
     blurb: "Maps a cyber-threat-intelligence procedure sentence to the one matching MITRE ATT&CK technique ID.",
+    outputDesc: "→ a MITRE ATT&CK technique ID (e.g. T1059.001)",
     instruction: "What ATT&CK technique does the following CTI procedure sentence describe?",
     wrapTag: "cti",
     inputLabel: "CTI text",
@@ -60,6 +66,7 @@ const ADAPTERS = [
     name: "genai-attack-vector",
     label: "GenAI attack vector",
     blurb: "Classifies a GenAI security incident into one attack-vector label (14-way closed set).",
+    outputDesc: "→ one of 14 attack-vector labels (e.g. prompt-injection)",
     instruction: "What attack vector does the following GenAI security incident describe?",
     wrapTag: "incident",
     inputLabel: "Incident description",
@@ -79,6 +86,7 @@ const ADAPTERS = [
     name: "text-to-json",
     label: "Text → JSON",
     blurb: "Turns a natural-language request plus a JSON schema into a populated JSON object that conforms to the schema.",
+    outputDesc: "→ a JSON object conforming to your schema",
     instruction: null, // no instruction line, no tag — schema preamble instead
     wrapTag: null,
     inputLabel: "Request",
@@ -171,6 +179,10 @@ const baseOutEl = $("base-out");
 const adapterOutEl = $("adapter-out");
 const examplesEl = $("examples");
 const runBtn = $("run");
+const adapterCardsEl = $("adapter-cards");
+const promptViewEl = $("prompt-view");
+const promptBaseEl = $("prompt-base");
+const promptAdapterEl = $("prompt-adapter");
 const setStatus = (s) => (statusEl.textContent = s);
 
 const progressWrap = $("progress-wrap");
@@ -230,6 +242,9 @@ const COLUMN = { base: () => baseOutEl, adapter: () => adapterOutEl };
 const accum = { base: "", adapter: "" };
 const tickers = { base: null, adapter: null };
 const resolvers = { base: null, adapter: null }; // resolve the in-flight leg's promise
+// The templated prompt (after chat template) of the most recent run, per leg — fed
+// into the "View raw prompt" panel once both legs of a Compare have completed.
+const lastPrompts = { base: "", adapter: "" };
 
 function finishLeg(which) {
   tickers[which]?.stop();
@@ -279,6 +294,8 @@ worker.onmessage = (e) => {
       // view (MITRE id / slug / JSON) built from the authoritative full text.
       if (m.which === "adapter") applyRender(adapterOutEl, activeAdapter.render(m.raw));
       else baseOutEl.textContent = accum.base || m.raw || "(no output)";
+      // Stash this leg's templated prompt (after chat template) for the raw-prompt viewer.
+      if (typeof m.prompt === "string") lastPrompts[m.which] = m.prompt;
       finishLeg(m.which);
       break;
     case "error":
@@ -330,6 +347,36 @@ function applyRender(el, r) {
   else el.textContent = r.text;
 }
 
+// Render the two templated prompts (after chat template) into the "View raw prompt"
+// panel, highlighting the active adapter's control token so the injected switch is
+// obvious. `controlToken` is highlighted only in the adapter leg (it never appears in
+// the base leg). Escapes first, then wraps the (already-escaped) token spelling.
+function renderPromptView(adapter) {
+  const token = controlTokenOf(adapter); // e.g. <|cti-technique-mapping|>
+  const escToken = escapeHtml(token);
+  const highlight = (s) =>
+    escapeHtml(s).split(escToken).join(`<span class="ctrl-tok">${escToken}</span>`);
+
+  promptBaseEl.innerHTML = lastPrompts.base ? escapeHtml(lastPrompts.base) : "—";
+  promptAdapterEl.innerHTML = lastPrompts.adapter ? highlight(lastPrompts.adapter) : "—";
+  promptViewEl.hidden = false;
+}
+
+// Build the per-adapter info cards in the "How the switch works" explainer.
+function renderAdapterCards() {
+  adapterCardsEl.replaceChildren();
+  for (const a of ADAPTERS) {
+    const card = document.createElement("div");
+    card.className = "adapter-card";
+    card.innerHTML =
+      `<span class="ac-label">${escapeHtml(a.label)}</span>` +
+      `<span class="tok">${escapeHtml(controlTokenOf(a))}</span><br />` +
+      `${escapeHtml(a.blurb)}<br />` +
+      `<span class="ac-out">${escapeHtml(a.outputDesc)}</span>`;
+    adapterCardsEl.appendChild(card);
+  }
+}
+
 // Post one generation leg to the worker and resolve when its "complete"/"error"
 // message arrives. `useAdapter` toggles the control token (adapter ON/OFF).
 function runLeg(which, adapter, useAdapter, phaseLabel) {
@@ -370,9 +417,11 @@ async function compare() {
   setTabsDisabled(true);
   baseOutEl.textContent = "…";
   adapterOutEl.textContent = "…";
+  lastPrompts.base = lastPrompts.adapter = "";
   try {
     await runLeg("base", adapter, false, "base model decoding");
     await runLeg("adapter", adapter, true, `${adapter.label} decoding`);
+    renderPromptView(adapter); // both legs' templated prompts are now captured
     setStatus("done");
   } finally {
     runBtn.disabled = false;
@@ -419,8 +468,15 @@ function selectTab(adapter) {
 
   baseOutEl.textContent = "—";
   adapterOutEl.textContent = "—";
+  // The raw-prompt panel reflects the last run of the previous tab; hide it until
+  // this tab is run so it can't show a mismatched (other-adapter) prompt.
+  promptViewEl.hidden = true;
+  lastPrompts.base = lastPrompts.adapter = "";
   renderExampleChips(adapter);
 }
+
+// Per-adapter info cards in the explainer (static; built once from ADAPTERS).
+renderAdapterCards();
 
 // Build the tab strip from ADAPTERS.
 for (const a of ADAPTERS) {

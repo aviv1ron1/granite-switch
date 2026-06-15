@@ -50,6 +50,32 @@
       .out pre.json { margin: 0; font-family: ui-monospace, monospace; font-size: .85rem; white-space: pre-wrap; }
       .status { font-size: .85rem; color: #888; min-height: 1.2em; }
       code { background: #0001; padding: .1rem .3rem; border-radius: 3px; }
+      /* "How it works" explainer */
+      .explain { border: 1px solid #8883; border-radius: 8px; padding: .8rem 1.1rem; margin: 1.2rem 0;
+        background: #6366f10d; font-size: .9rem; }
+      .explain h2 { font-size: 1rem; margin: 0 0 .5rem; }
+      .explain p { margin: .4rem 0; }
+      .explain ol { margin: .4rem 0 .6rem; padding-left: 1.3rem; }
+      .explain li { margin: .25rem 0; }
+      .explain .links { margin-top: .6rem; }
+      .adapters { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .6rem; margin: .7rem 0 .2rem; }
+      @media (max-width: 640px) { .adapters { grid-template-columns: 1fr; } }
+      .adapter-card { border: 1px solid #8884; border-radius: 6px; padding: .55rem .7rem; font-size: .84rem; }
+      .adapter-card .ac-label { font-weight: 600; display: block; margin-bottom: .15rem; }
+      .adapter-card .tok { font-family: ui-monospace, monospace; color: #6366f1; font-size: .8rem; }
+      .adapter-card .ac-out { color: #888; }
+      /* Raw-prompt viewer */
+      details.prompt-view { margin: 1rem 0; border: 1px solid #8883; border-radius: 8px; padding: 0 1rem; }
+      details.prompt-view > summary { cursor: pointer; padding: .7rem 0; font-size: .9rem; font-weight: 600; }
+      details.prompt-view[open] > summary { border-bottom: 1px solid #8883; margin-bottom: .8rem; }
+      .prompt-hint { color: #888; font-size: .82rem; margin: 0 0 .7rem; }
+      .prompt-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: .9rem; }
+      @media (max-width: 640px) { .prompt-cols { grid-template-columns: 1fr; } }
+      .prompt-col h4 { margin: 0 0 .35rem; font-size: .82rem; color: #888; font-weight: 600; }
+      pre.prompt { margin: 0; font-family: ui-monospace, monospace; font-size: .78rem; line-height: 1.4;
+        white-space: pre-wrap; word-break: break-word; background: #0001; padding: .6rem; border-radius: 6px;
+        max-height: 22rem; overflow: auto; }
+      .ctrl-tok { background: #6366f133; color: #6366f1; font-weight: 700; border-radius: 4px; padding: 0 .15rem; }
       progress {
         width: 100%; height: .7rem; appearance: none; -webkit-appearance: none;
         border: none; border-radius: 999px; overflow: hidden; background: #0001;
@@ -76,7 +102,37 @@
       <code>granite_switch</code> architecture), loading
       <a href="https://huggingface.co/barha/granite-switch-4.0-350m-demo-onnx">the ONNX
       model</a> (int8 — first load downloads ~440&nbsp;MB).
+      <br />
+      <span class="links">
+        🔗
+        <a href="https://research.ibm.com/blog/granite-libraries-project-switch" target="_blank" rel="noopener">IBM Research blog</a>
+        ·
+        <a href="https://github.com/generative-computing/granite-switch" target="_blank" rel="noopener">granite-switch library (GitHub)</a>
+        ·
+        <a href="https://huggingface.co/barha/granite-switch-4.0-350m-demo-onnx" target="_blank" rel="noopener">model on Hugging Face</a>
+      </span>
     </p>
+
+    <section class="explain">
+      <h2>How the switch works</h2>
+      <p>
+        A LoRA adapter is a small set of low-rank weight deltas that specializes the base
+        model for one task. Granite Switch <strong>embeds several adapters in one
+        checkpoint</strong> and turns exactly one on per request by prepending its
+        <strong>control token</strong> to the prompt — the chat template does this
+        automatically when you name an adapter. No adapter is loaded or swapped at runtime;
+        the same forward pass routes through the selected adapter's deltas.
+      </p>
+      <ol>
+        <li>You pick a tab (= an adapter) and enter input.</li>
+        <li>The chat template wraps your input in the adapter's trained framing and injects
+            its control token (e.g. <code>&lt;|cti-technique-mapping|&gt;</code>).</li>
+        <li>We run the <strong>same</strong> input twice — adapter <strong>OFF</strong> (plain
+            base model) vs <strong>ON</strong> — so the structured lift is visible side by side.</li>
+      </ol>
+      <p style="margin:.6rem 0 .2rem">The three skills embedded in this checkpoint:</p>
+      <div class="adapters" id="adapter-cards"></div>
+    </section>
 
     <div class="progress-wrap" id="progress-wrap">
       <progress id="progress" value="0" max="100"></progress>
@@ -113,6 +169,25 @@
         <div class="out" id="adapter-out">—</div>
       </div>
     </div>
+
+    <details class="prompt-view" id="prompt-view" hidden>
+      <summary>View raw prompt (after chat template)</summary>
+      <p class="prompt-hint">
+        The exact text fed to the model for the last run, after the chat template. The adapter
+        side injects the <span class="ctrl-tok">control token</span> that fires the switch; the
+        base side is the identical framing without it.
+      </p>
+      <div class="prompt-cols">
+        <div class="prompt-col">
+          <h4>🟡 Base (no control token)</h4>
+          <pre class="prompt" id="prompt-base">—</pre>
+        </div>
+        <div class="prompt-col">
+          <h4>🟢 Adapter ON (control token injected)</h4>
+          <pre class="prompt" id="prompt-adapter">—</pre>
+        </div>
+      </div>
+    </details>
 
     <script type="module" src="/src/main.js"></script>
   </body>

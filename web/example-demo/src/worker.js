@@ -119,6 +119,9 @@ async function handleGenerate(payload) {
     // string (its buildContent fn can't cross postMessage), so we override directly.
     if (content != null) encodeOpts.buildContent = () => content;
 
+    // The exact templated prompt the model is decoded against (with the injected
+    // control token when an adapter fires) — surfaced to the UI's "view raw prompt".
+    const prompt = tok.renderPrompt(text, encodeOpts);
     const ids = tok.encode(text, encodeOpts);
     const inputIds = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
 
@@ -149,7 +152,7 @@ async function handleGenerate(payload) {
       streamer,
     });
     const out = Array.from(seq.tolist()[0], (v) => Number(v)).slice(ids.length);
-    self.postMessage({ type: "complete", which, raw: tok.decode(out).trim(), numTokens });
+    self.postMessage({ type: "complete", which, raw: tok.decode(out).trim(), numTokens, prompt });
   } catch (err) {
     self.postMessage({ type: "error", which, message: err?.message ?? String(err) });
   }

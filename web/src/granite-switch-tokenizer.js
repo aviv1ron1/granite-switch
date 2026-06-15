@@ -110,7 +110,20 @@ export class GraniteSwitchTokenizer {
    * @param {boolean} [opts.addGenerationPrompt=true]
    * @returns {number[]} token ids
    */
-  encode(text, { adapterName, instruction, wrapTag = "cti", buildContent, addGenerationPrompt = true } = {}) {
+  /**
+   * Render the user message through the chat template WITHOUT tokenizing, and
+   * return the resulting prompt STRING — i.e. the exact "raw prompt after the
+   * prompt template" the model is decoded against, including the injected adapter
+   * control token (when an adapter is active) and the instruction/tag framing.
+   *
+   * `encode()` is `tokenize(renderPrompt(...))`; this method exists so callers
+   * (e.g. the browser demo's "view raw prompt") can show the same string the
+   * tokenizer feeds the model, with no extra template logic to keep in sync.
+   *
+   * Accepts the SAME options as {@link encode}.
+   * @returns {string} the templated prompt
+   */
+  renderPrompt(text, { adapterName, instruction, wrapTag = "cti", buildContent, addGenerationPrompt = true } = {}) {
     // `adapterName: null` (explicit) => base model, no control token. `undefined`
     // => default to the first adapter. A truthy string => that adapter.
     const adapter = adapterName === null
@@ -129,7 +142,7 @@ export class GraniteSwitchTokenizer {
     } else {
       content = text;
     }
-    const rendered = this.tok.apply_chat_template(
+    return this.tok.apply_chat_template(
       [{ role: "user", content }],
       {
         tokenize: false,
@@ -138,6 +151,10 @@ export class GraniteSwitchTokenizer {
         adapter_name: adapter,
       },
     );
+  }
+
+  encode(text, opts = {}) {
+    const rendered = this.renderPrompt(text, opts);
     const enc = this.tok(rendered, { add_special_tokens: false });
     // enc.input_ids is a transformers.js Tensor ([1, seq]); flatten to a JS array.
     return Array.from(enc.input_ids.data, Number);
