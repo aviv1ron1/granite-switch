@@ -21,7 +21,7 @@ import os
 import torch
 
 from .wrapper import OnnxPrefillWrapper, reskin_for_export
-from .decode import OnnxDecodeWrapper
+from .decode import OnnxDecodeWrapper, OnnxPrefillStateWrapper
 
 OPSET = 18  # dynamo exporter; lowest opset with the ops the switch/LoRA path needs.
 
@@ -170,20 +170,47 @@ def _save_external_copy(src_onnx, dst_onnx):
 
 
 def export_prefill(model, output_path, *, example_input_ids, opset=OPSET, embed=True):
-    """Export the no-cache prefill graph (``input_ids -> logits``).
+    """Export the batched prefill graph.
 
-    ``model`` is reskinned in place to the branchless Onnx* modules. ``seq_len``
-    is a dynamic axis so any prompt length works at runtime. ``embed`` folds
+    Inputs ``input_ids`` (``[b, seq_len]``, ``seq_len`` dynamic). Outputs the SAME
+    state tuple as the decode graph so a single prefill seeds incremental decode:
+    ``logits``, ``present_switch_key0``, ``present_switch_val0``,
+    ``present_key.{i}``, ``present_value.{i}``. This is the Python HF model's
+    batched-prefill forward (one pass over the prompt) — the browser runtime runs
+    it ONCE instead of replaying the prompt token-by-token through the decode graph.
+
+    The output names MUST match :func:`export_decode`'s ``present_*`` names exactly:
+    transformers.js stores the prefill ``present_*`` into its cache (renaming
+    ``present`` -> ``past_key_values``) and feeds it straight into the first decode
+    step (see ``web/src/granite-switch-register.js``). Any name drift breaks the
+    prefill->decode handoff.
+
+    ``model`` is reskinned in place to the branchless Onnx* modules. ``embed`` folds
     weights inline (small models); set ``embed=False`` to keep an external
     ``.onnx.data`` sidecar for large (> 2 GiB) models.
+
+    NOTE: the legacy logits-only :class:`OnnxPrefillWrapper` is retained for any
+    callers that only need the prompt logits; this exporter uses the stateful
+    wrapper so the artifact is browser-loadable as a true prefill.
     """
     reskin_for_export(model)
-    wrapper = OnnxPrefillWrapper(model).eval()
+    wrapper = OnnxPrefillStateWrapper(model).eval()
+    n_layers = wrapper.num_layers
+
+    # Output names IDENTICAL in ordering to export_decode's out_names (sans the
+    # past_* inputs, which prefill doesn't take). logits first, then the switch
+    # state, then all present_key.{i}, then all present_value.{i}.
+    out_names = ["logits", "present_switch_key0", "present_switch_val0"]
+    for li in range(n_layers):
+        out_names.append(f"present_key.{li}")
+    for li in range(n_layers):
+        out_names.append(f"present_value.{li}")
+
     seq = torch.export.Dim("seq_len")
     with torch.no_grad():
         torch.onnx.export(
             wrapper, (example_input_ids,), output_path,
-            input_names=["input_ids"], output_names=["logits"],
+            input_names=["input_ids"], output_names=out_names,
             dynamic_shapes=({1: seq},),
             opset_version=opset, dynamo=True,
         )

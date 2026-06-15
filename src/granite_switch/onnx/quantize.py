@@ -152,19 +152,29 @@ def quantize_model_dir(out_dir, *, scheme="int8", block_size=32):
         quantize_onnx(src, dst, scheme=scheme, block_size=block_size)
         results[name] = dst
 
-    # Mirror the quantized decode graph into tfjs/onnx/model_<scheme>.onnx.
+    # Mirror the quantized graphs into the tfjs/ layout so transformers.js can pick
+    # them via `dtype: "<scheme>"`:
+    #   decode  -> tfjs/onnx/model_<scheme>.onnx   (the default decoder file)
+    #   prefill -> tfjs/onnx/prefill_<scheme>.onnx (loaded as the batched-prefill
+    #              session; without this the browser has no quantized prefill and
+    #              silently falls back to per-token prompt replay — slow first token).
     tfjs_onnx = os.path.join(out_dir, "tfjs", "onnx")
-    dec = results.get("decode")
-    if dec and os.path.isdir(tfjs_onnx):
+    if os.path.isdir(tfjs_onnx):
         import onnx
-        tfjs_q = os.path.join(tfjs_onnx, f"model_{scheme}.onnx")
-        m = onnx.load(dec, load_external_data=True)
-        onnx.save(
-            m, tfjs_q,
-            save_as_external_data=True, all_tensors_to_one_file=True,
-            location=f"model_{scheme}.onnx.data", size_threshold=1024,
-            convert_attribute=False,
-        )
-        results["tfjs_decode"] = tfjs_q
+
+        # (src result key, tfjs file stem) for each graph to mirror.
+        for src_key, tfjs_stem in (("decode", "model"), ("prefill", "prefill")):
+            src = results.get(src_key)
+            if not src:
+                continue
+            tfjs_q = os.path.join(tfjs_onnx, f"{tfjs_stem}_{scheme}.onnx")
+            m = onnx.load(src, load_external_data=True)
+            onnx.save(
+                m, tfjs_q,
+                save_as_external_data=True, all_tensors_to_one_file=True,
+                location=f"{tfjs_stem}_{scheme}.onnx.data", size_threshold=1024,
+                convert_attribute=False,
+            )
+            results[f"tfjs_{src_key}"] = tfjs_q
 
     return results

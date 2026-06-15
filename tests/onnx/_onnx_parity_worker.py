@@ -32,7 +32,7 @@ import torch
 
 from granite_switch.config import GraniteSwitchConfig
 from granite_switch.hf import GraniteSwitchForCausalLM
-from granite_switch.onnx.export import export_prefill
+from granite_switch.onnx.export import export_prefill, export_decode
 
 
 def build_tiny_model(seed: int = 0):
@@ -106,17 +106,112 @@ def run_parity(seq_len: int = 6, verbose: bool = True):
     return ok, max_diff, mean_diff
 
 
+def run_prefill_decode_handoff(seq_len: int = 6, verbose: bool = True):
+    """Verify the batched prefill seeds incremental decode correctly.
+
+    This is the browser runtime's path: run the WHOLE prompt through the prefill
+    graph once (emitting present_* state), then run ONE decode step on the next
+    token seeded by that state. The next-token logits MUST match a pure per-token
+    decode replay of the same prompt+token (the OLD browser behavior). This asserts
+    that (a) the prefill graph's present_* names/shapes interlock with the decode
+    graph's past_* inputs, and (b) the batched prefill is numerically faithful to
+    the serial replay it replaces. Run on CPU under onnxruntime.
+    """
+    model, cfg = build_tiny_model()
+    n_layers = len(model.model.layers)
+    kvh = model.model.layers[0].self_attn.num_key_value_heads
+    hd = model.model.layers[0].self_attn.head_dim
+
+    torch.manual_seed(7)
+    ids = torch.randint(2, 200, (1, seq_len))
+    ids[0, 2] = 250  # adapter_1 control token (cumulative selection)
+    next_tok = int(torch.randint(2, 200, (1,)).item())
+
+    with tempfile.TemporaryDirectory() as td:
+        prefill_path = os.path.join(td, "prefill.onnx")
+        decode_path = os.path.join(td, "decode.onnx")
+        # export_prefill reskins the model in place; decode reuses the reskinned model.
+        export_prefill(model, prefill_path, example_input_ids=ids)
+        export_decode(model, decode_path, n_layers=n_layers, kv_heads=kvh, head_dim=hd)
+
+        import onnxruntime as ort
+
+        pf = ort.InferenceSession(prefill_path, providers=["CPUExecutionProvider"])
+        dc = ort.InferenceSession(decode_path, providers=["CPUExecutionProvider"])
+
+        def decode_step(tok, state):
+            """One decode step. `state` is the present_* dict from the prior step."""
+            feed = {
+                "input_ids": np.array([[tok]], dtype=np.int64),
+                "past_switch_key0": state["switch_key0"],
+                "past_switch_val0": state["switch_val0"],
+            }
+            for li in range(n_layers):
+                feed[f"past_key.{li}"] = state["k"][li]
+                feed[f"past_value.{li}"] = state["v"][li]
+            out_names = ["logits", "present_switch_key0", "present_switch_val0"]
+            out_names += [f"present_key.{li}" for li in range(n_layers)]
+            out_names += [f"present_value.{li}" for li in range(n_layers)]
+            outs = dict(zip(out_names, dc.run(out_names, feed)))
+            new_state = {
+                "switch_key0": outs["present_switch_key0"],
+                "switch_val0": outs["present_switch_val0"],
+                "k": [outs[f"present_key.{li}"] for li in range(n_layers)],
+                "v": [outs[f"present_value.{li}"] for li in range(n_layers)],
+            }
+            return outs["logits"], new_state
+
+        # ── Path A: prefill once, then ONE decode step on next_tok ──
+        pf_out_names = ["logits", "present_switch_key0", "present_switch_val0"]
+        pf_out_names += [f"present_key.{li}" for li in range(n_layers)]
+        pf_out_names += [f"present_value.{li}" for li in range(n_layers)]
+        pf_outs = dict(zip(pf_out_names, pf.run(pf_out_names, {"input_ids": ids.numpy().astype(np.int64)})))
+        state_A = {
+            "switch_key0": pf_outs["present_switch_key0"],
+            "switch_val0": pf_outs["present_switch_val0"],
+            "k": [pf_outs[f"present_key.{li}"] for li in range(n_layers)],
+            "v": [pf_outs[f"present_value.{li}"] for li in range(n_layers)],
+        }
+        logits_A, _ = decode_step(next_tok, state_A)
+
+        # ── Path B: pure per-token decode replay of the prompt, then next_tok ──
+        zero_switch = np.zeros((1, 0), dtype=np.float32)
+        state_B = {
+            "switch_key0": zero_switch, "switch_val0": zero_switch,
+            "k": [np.zeros((1, kvh, 0, hd), dtype=np.float32) for _ in range(n_layers)],
+            "v": [np.zeros((1, kvh, 0, hd), dtype=np.float32) for _ in range(n_layers)],
+        }
+        for t in ids[0].tolist():
+            _, state_B = decode_step(int(t), state_B)
+        logits_B, _ = decode_step(next_tok, state_B)
+
+    diff = np.abs(logits_A - logits_B)
+    max_diff = float(diff.max())
+    if verbose:
+        print(f"  seq_len={seq_len}, next_tok={next_tok}")
+        print(f"  prefill-seeded decode logits: {logits_A.shape}; replay-seeded: {logits_B.shape}")
+        print(f"  max |diff| (prefill-handoff vs replay) = {max_diff:.3e}")
+    ok = np.allclose(logits_A, logits_B, rtol=1e-3, atol=1e-4)
+    return ok, max_diff
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seq-len", type=int, default=6)
     args = parser.parse_args()
 
     print("ONNX prefill parity (HF backend vs onnxruntime):")
-    ok, max_diff, _ = run_parity(seq_len=args.seq_len)
-    if ok:
-        print(f"\nPASS: ONNX logits match HF (max |diff| = {max_diff:.3e})")
+    ok1, max_diff1, _ = run_parity(seq_len=args.seq_len)
+    print(f"  prefill-vs-HF: {'PASS' if ok1 else 'FAIL'} (max |diff| = {max_diff1:.3e})")
+
+    print("\nONNX prefill->decode handoff (batched prefill vs per-token replay):")
+    ok2, max_diff2 = run_prefill_decode_handoff(seq_len=args.seq_len)
+    print(f"  handoff-vs-replay: {'PASS' if ok2 else 'FAIL'} (max |diff| = {max_diff2:.3e})")
+
+    if ok1 and ok2:
+        print("\nPASS: batched prefill matches HF AND seeds decode identically to replay.")
         return 0
-    print(f"\nFAIL: ONNX logits differ (max |diff| = {max_diff:.3e})")
+    print("\nFAIL: see per-check results above.")
     return 1
 
 

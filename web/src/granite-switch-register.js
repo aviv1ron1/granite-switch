@@ -62,7 +62,7 @@ import {
   boolTensor,
 } from "@huggingface/transformers/src/models/modeling_utils.js";
 import { Tensor, ones } from "@huggingface/transformers/src/utils/tensor.js";
-import { sessionRun } from "@huggingface/transformers/src/models/session.js";
+import { sessionRun, constructSessions } from "@huggingface/transformers/src/models/session.js";
 import { pick } from "@huggingface/transformers/src/utils/core.js";
 import { AutoModelForCausalLM } from "@huggingface/transformers/src/models/auto/modeling_auto.js";
 import { AutoConfig } from "@huggingface/transformers/src/configs.js";
@@ -169,10 +169,33 @@ async function runDecodeStep(session, singleTokenIds, pastFeeds) {
 async function graniteSwitchForward(self, model_inputs) {
   const session = self.sessions["model"];
   const { past_key_values, input_ids } = model_inputs;
+  const hasPast = past_key_values && Object.keys(past_key_values).length > 0;
+
+  // ── Batched prefill (first forward, empty cache) ──
+  // transformers.js hands the WHOLE prompt to the first _forward. If a stateful
+  // prefill session is loaded, run it ONCE over all prompt tokens — the Python HF
+  // model's batched prefill — instead of replaying the prompt token-by-token
+  // through the decode graph (which is N serial session.run calls => slow first
+  // token). The prefill graph emits present_* with the SAME names as the decode
+  // graph, so transformers.js's getPastKeyValues rolls them into the cache and the
+  // first decode step consumes them. logits come back [1, seqLen, vocab]; generate
+  // slices the last position itself — we return the raw outputs unchanged.
+  if (!hasPast) {
+    const prefill = self.sessions["prefill"];
+    if (prefill) {
+      const feeds = { input_ids };
+      if (prefill.inputNames.includes("num_logits_to_keep")) {
+        feeds.num_logits_to_keep = new Tensor("int64", [0n], []);
+      }
+      return await sessionRun(prefill, pick(feeds, prefill.inputNames));
+    }
+    // No prefill session (older repo / load failed) → fall back to the per-token
+    // decode replay below. Correct, just slower for the first token.
+  }
 
   // Seed the `past_*` feeds: from the cache (steady state) or zero-filled (start).
   let pastFeeds = {};
-  if (past_key_values && Object.keys(past_key_values).length > 0) {
+  if (hasPast) {
     for (const key in past_key_values) {
       pastFeeds[storedNameToGraphInput(key)] = past_key_values[key];
     }
@@ -301,13 +324,48 @@ export async function loadGraniteSwitch(repo, opts = {}) {
     ...rest
   } = opts;
 
+  const suffix = { fp32: "", int8: "_int8", q4: "_q4" }[dtype] ?? "";
+
   const session_options = { ...(rest.session_options ?? {}) };
   if (external && !session_options.externalData) {
     // Default model file stem + dtype suffix -> sidecar basename.
-    const suffix = { fp32: "", int8: "_int8", q4: "_q4" }[dtype] ?? "";
     const stem = (opts.modelFileName ?? "model") + suffix;
     const sidecar = externalDataName ?? `${stem}.onnx.data`;
     session_options.externalData = [{ path: sidecar, data: `${subfolder}/${sidecar}` }];
   }
-  return GraniteSwitchForCausalLM.from_pretrained(repo, { ...rest, dtype, subfolder, session_options });
+  const model = await GraniteSwitchForCausalLM.from_pretrained(
+    repo, { ...rest, dtype, subfolder, session_options },
+  );
+
+  // ── Optionally load the batched-prefill session alongside the decode session. ──
+  // The model's only built-in session is the decode graph (`model`). We load the
+  // prefill graph (onnx/prefill[_suffix].onnx) as a SECOND session and stash it at
+  // self.sessions.prefill so graniteSwitchForward can run the whole prompt in one
+  // pass. Use the framework's constructSessions (NOT a raw ort.InferenceSession):
+  // it joins onnxruntime-web's init/inference serialization chain and reuses the
+  // same dtype/device/external-data plumbing — a hand-rolled session would risk
+  // "Session already started" and bypass that plumbing.
+  //
+  // Optional by design: a repo without a stateful prefill graph (or a load failure)
+  // leaves self.sessions.prefill unset, and graniteSwitchForward falls back to the
+  // per-token decode replay. So this never blocks loading.
+  try {
+    const prefillStem = "prefill" + suffix;
+    const prefillOpts = {
+      ...rest,                       // carries `device`, `config`, `progress_callback`, …
+      dtype,
+      subfolder,
+      session_options: external
+        ? { externalData: [{ path: `${prefillStem}.onnx.data`,
+                             data: `${subfolder}/${prefillStem}.onnx.data` }] }
+        : {},
+    };
+    // names map { prefill: "prefill" }: session key `prefill`, file stem `prefill`
+    // (+ dtype suffix appended by getSession). Resolves onnx/prefill[_suffix].onnx.
+    const prefillSessions = await constructSessions(repo, { prefill: "prefill" }, prefillOpts);
+    model.sessions.prefill = prefillSessions.prefill;
+  } catch (_) {
+    // Older repo / missing artifact / unsupported — fall back to decode replay.
+  }
+  return model;
 }
