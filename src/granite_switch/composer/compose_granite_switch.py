@@ -60,6 +60,7 @@ from granite_switch.composer.adapter_discovery import (
     resolve_repo_path,
 )
 from granite_switch.composer.tokenizer_setup import (
+    add_audio_token,
     add_control_tokens,
     configure_chat_template,
     get_alora_first_invocation_token_id,
@@ -570,6 +571,27 @@ Examples:
         default=False,
         help="Include debug fields (original_path) in adapter_index.json",
     )
+    parser.add_argument(
+        "--enable-audio",
+        action="store_true",
+        default=False,
+        help="Enable the audio cascade: add the <|audio|> marker token and set "
+             "asr_enabled in the config so the vLLM backend transcribes audio.",
+    )
+    parser.add_argument(
+        "--asr-model",
+        type=str,
+        default=None,
+        help="HF id of the speech-to-text model the audio preprocessor loads. "
+             "Implies --enable-audio. Defaults to a small built-in model when unset.",
+    )
+    parser.add_argument(
+        "--asr-device",
+        type=str,
+        default="cpu",
+        help="Device the ASR model runs on (default: cpu). Use e.g. cuda:0 to "
+             "run transcription on GPU (watch vLLM's KV-cache memory budget).",
+    )
     return parser
 
 
@@ -773,6 +795,11 @@ def build():
 
     adapter_token_ids, special_tokens = add_control_tokens(tokenizer, all_discovered)
 
+    # Audio cascade: add the <|audio|> marker token before the embedding resize.
+    # Enabled by --enable-audio or by naming an --asr-model.
+    audio_enabled = args.enable_audio or args.asr_model is not None
+    audio_token_id = add_audio_token(tokenizer) if audio_enabled else None
+
     # Configure chat template with adapter mappings (Granite models only).
     # Non-Granite models preserve the upstream template verbatim because
     # the injection targets Granite-specific Jinja patterns.
@@ -833,6 +860,18 @@ def build():
         built_in_lora_alpha=args.lora_alpha if args.lora_alpha is not None else float(args.lora_rank),
         **optional_kwargs,
     )
+
+    # Record audio-cascade settings in the config so the checkpoint is
+    # self-describing and the vLLM backend gates audio on asr_enabled.
+    if audio_enabled:
+        model.config.asr_enabled = True
+        model.config.asr_model_id = args.asr_model
+        model.config.asr_device = args.asr_device
+        print(
+            f"  Audio cascade enabled "
+            f"(asr_model_id={args.asr_model or 'default'}, "
+            f"asr_device={args.asr_device}, audio_token_id={audio_token_id})"
+        )
 
     # Base model size (best effort)
     base_model_size_gb, _ = _get_directory_size(base_model_local_path)
