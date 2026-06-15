@@ -281,9 +281,36 @@ async function init() {
   runBtn.disabled = false;
 }
 
+// ── Live inference indicator ───────────────────────────────────────────────────
+// ORT-web runs the decode on the main thread; each token is one `await session.run`,
+// which IS a real event-loop turn (transformers.js's generate loop awaits forward()
+// between every token — see modeling_utils.js). So a `streamer` that touches the DOM
+// per token paints, and a requestAnimationFrame ticker keeps a spinner moving even
+// while a single token is in flight. Together they make it obvious the page is busy
+// decoding, not hung.
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+// Animates a "running" line into `el` (spinner · elapsed · token count) until
+// stop() is called. Independent of the decode loop, so it moves even between tokens.
+function startTicker(el, phaseLabel) {
+  let raf = 0, frame = 0, tokens = 0;
+  const t0 = performance.now();
+  const tick = () => {
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    el.textContent = `${SPIN[frame++ % SPIN.length]} ${phaseLabel} · ${secs}s · ${tokens} tokens`;
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return {
+    bump: () => { tokens++; },
+    stop: () => cancelAnimationFrame(raf),
+  };
+}
+
 // One greedy generation for the active adapter. `useAdapter` toggles the control
-// token (adapter ON/OFF).
-async function generate(adapter, { useAdapter }) {
+// token (adapter ON/OFF). `outEl` (optional) receives a live "decoding…" indicator
+// driven by the per-token streamer.
+async function generate(adapter, { useAdapter, outEl, phaseLabel }) {
   const text = (promptEl.value || "").trim();
   const encodeOpts = {
     // Pass the EXPLICIT adapter name when ON (not `undefined`, which would always
@@ -298,14 +325,32 @@ async function generate(adapter, { useAdapter }) {
   }
   const ids = tok.encode(text, encodeOpts);
   const inputIds = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
-  const seq = await model.generate({
-    inputs: inputIds,
-    max_new_tokens: useAdapter ? adapter.adapterMaxNewTokens : adapter.baseMaxNewTokens,
-    do_sample: false,
-    num_beams: 1,
-  });
-  const out = Array.from(seq.tolist()[0], (v) => Number(v)).slice(ids.length);
-  return tok.decode(out).trim();
+
+  // Drive a live "decoding…" indicator into the output card while tokens stream.
+  const ticker = outEl ? startTicker(outEl, phaseLabel ?? "decoding") : null;
+  // A minimal streamer: transformers.js calls put(all_ids) once for the prompt then
+  // put(new_ids) per generated step, and end() at the finish. We only count steps.
+  let prompted = false;
+  const streamer = ticker
+    ? {
+        put() { if (!prompted) { prompted = true; return; } ticker.bump(); },
+        end() {},
+      }
+    : null;
+
+  try {
+    const seq = await model.generate({
+      inputs: inputIds,
+      max_new_tokens: useAdapter ? adapter.adapterMaxNewTokens : adapter.baseMaxNewTokens,
+      do_sample: false,
+      num_beams: 1,
+      ...(streamer ? { streamer } : {}),
+    });
+    const out = Array.from(seq.tolist()[0], (v) => Number(v)).slice(ids.length);
+    return tok.decode(out).trim();
+  } finally {
+    ticker?.stop();
+  }
 }
 
 function applyRender(el, r) {
@@ -319,18 +364,25 @@ async function compare() {
   const adapter = activeAdapter;
   if ((promptEl.value || "").trim() === "") return;
   runBtn.disabled = true;
+  const runLabel = runBtn.textContent;
+  runBtn.textContent = "Running…";
   setTabsDisabled(true);
   baseOutEl.textContent = "…";
   adapterOutEl.textContent = "…";
   try {
-    // Base: no adapter. Tends to ramble in prose — give it room.
+    // Base: no adapter. Tends to ramble in prose — give it room. The output card
+    // shows a live spinner · elapsed · token-count line while it decodes.
     setStatus("running base model (adapter OFF)…");
-    const baseRaw = await generate(adapter, { useAdapter: false });
+    const baseRaw = await generate(adapter, {
+      useAdapter: false, outEl: baseOutEl, phaseLabel: "base model decoding",
+    });
     baseOutEl.textContent = baseRaw || "(no output)";
 
     // Adapter: fires the control token; trained for this task's output shape.
     setStatus(`running Granite Switch (${adapter.label})…`);
-    const adapterRaw = await generate(adapter, { useAdapter: true });
+    const adapterRaw = await generate(adapter, {
+      useAdapter: true, outEl: adapterOutEl, phaseLabel: `${adapter.label} decoding`,
+    });
     applyRender(adapterOutEl, adapter.render(adapterRaw));
     setStatus("done");
   } catch (e) {
@@ -339,6 +391,7 @@ async function compare() {
     console.error(e);
   } finally {
     runBtn.disabled = false;
+    runBtn.textContent = runLabel;
     setTabsDisabled(false);
   }
 }
