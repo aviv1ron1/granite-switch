@@ -55,4 +55,7 @@ Enterprise bundle (697 techniques), bundled into the page.
 
 The demo loads the **int8** model variant, so the first load downloads ~440 MB of
 weights (a progress bar shows status); subsequent runs and tab switches reuse the one
-in-memory model. Built from the `granite-switch` repo's `web/example-demo` Vite app.
+in-memory model. The model runs in a **Web Worker** (the transformers.js-examples
+pattern), so generation never blocks the page — tokens **stream live** into the output
+column as they decode and the UI stays responsive. Built from the `granite-switch`
+repo's `web/example-demo` Vite app.

@@ -22,7 +22,13 @@ function stubNodeIo(stubPath) {
     name: "stub-transformers-node-io",
     enforce: "pre",
     async resolveId(source, importer) {
-      if (source.endsWith("/io.js") && importer && importer.includes("@huggingface/transformers")) {
+      // transformers.js's audio.js/image.js import `./io.js` (Node fs/stream blob save,
+      // unused by the text-only path). Redirect it to a browser stub. Match on either
+      // the relative specifier from a transformers importer, OR an already-resolved
+      // absolute path into the package — the worker build's resolution order differs
+      // from the main bundle's, so checking only the importer misses it there.
+      const isTransformers = (p) => !!p && p.includes("@huggingface/transformers");
+      if (source.endsWith("/io.js") && (isTransformers(importer) || isTransformers(source))) {
         return stubPath;
       }
       return null;
@@ -138,6 +144,29 @@ export default defineConfig({
         // 'X' before initialization"). Keep one chunk AND disable transitive-import
         // hoisting so the original (working) init order is preserved. (esbuild's
         // dev prebundle flattens the cycle, which is why `npm run dev` was fine.)
+        inlineDynamicImports: true,
+        hoistTransitiveImports: false,
+      },
+    },
+  },
+  // The model engine runs in src/worker.js (new Worker(new URL(...), {type:"module"})).
+  // Vite applies `plugins`, `resolve.alias`, and `define` to worker bundles by default
+  // (so the shim alias, node stubs, and process shims carry over), but
+  // `build.rollupOptions.output` does NOT propagate to workers — it must be repeated
+  // here. Without inlineDynamicImports + hoistTransitiveImports:false the worker hits
+  // the same Rollup temporal-dead-zone error in the cyclic transformers.js src/
+  // tokenizer graph that the main bundle was fixed for (see the build.rollupOptions
+  // comment above). format:"es" matches {type:"module"}.
+  worker: {
+    format: "es",
+    // Vite does NOT reliably apply top-level `plugins` to the worker bundle's
+    // resolution, so the io.js stub must be listed here explicitly — otherwise the
+    // worker pulls transformers.js's real utils/io.js (node:fs/stream) and the build
+    // fails. (resolve.alias/define DO carry over, so the shim alias + process shims
+    // don't need repeating.)
+    plugins: [stubNodeIo(fileURLToPath(new URL("./stubs/io.js", import.meta.url)))],
+    rollupOptions: {
+      output: {
         inlineDynamicImports: true,
         hoistTransitiveImports: false,
       },

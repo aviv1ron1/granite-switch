@@ -1,31 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// Granite Switch browser demo — NATIVE transformers.js load, ALL adapters.
+// Granite Switch browser demo — UI thread. ALL model work runs in worker.js.
 //
 // "One model, many skills": a SINGLE 350m checkpoint embeds three LoRA adapters,
 // each fired by its own control token — no weight reloading between tasks. The UI
 // is one tab per adapter; each tab runs the same input twice (adapter OFF = base
 // prose, adapter ON = the adapter's structured output) so the lift is visible.
 //
-// Importing the shim (../../src/granite-switch-register.js) registers the
-// `granite_switch` architecture and re-exports the transformers.js API bound to
-// the single `src/` module instance the shim mutates. We then:
-//   1. AutoModelForCausalLM.from_pretrained(repo)  -> a GraniteSwitchForCausalLM
-//      (transformers.js owns the ONNX session + fetches the external-data sidecar)
-//   2. tokenize the framed prompt (firing the chosen adapter's control token)
-//   3. greedy-generate and decode back to text.
-//
-// loadGraniteSwitch wires the `model[_int8].onnx.data` sidecar (see the shim);
-// the dtype (fp32/int8) is chosen at build time via VITE_DTYPE.
+// Architecture (transformers.js-examples pattern, e.g. smollm-webgpu): the model is
+// loaded and run inside a dedicated Web Worker (./worker.js). The main thread does
+// ONLY UI — it posts {load,generate} messages and renders {progress,ready,update,
+// complete} messages back. Tokens stream into the output column live as they decode,
+// so generation never freezes the page. dtype (fp32/int8) is chosen at build time via
+// VITE_DTYPE and forwarded to the worker.
 
-import {
-  loadGraniteSwitch,
-  AutoModelForCausalLM, // re-exported (patched) — proves the Auto path too
-  AutoTokenizer,        // dist/-instance tokenizer (see shim note re: bundling)
-  envForTokenizer,      // the env paired with that AutoTokenizer
-  env,
-  Tensor,
-} from "../../src/granite-switch-register.js";
-import { GraniteSwitchTokenizer } from "../../src/granite-switch-tokenizer.js";
 import MITRE_ID_TO_NAME from "./mitre_id_to_name.json";
 
 // ── Adapter output recognizers ────────────────────────────────────────────────
@@ -215,171 +202,116 @@ function onProgress(e) {
 }
 function hideProgress() { progressWrap.hidden = true; }
 
-let model, tok;
 let activeAdapter = ADAPTERS[0];
 
-// Apply the same remote-fetch config to an env instance (local-dev mode).
-function configureRemote(e, remoteHost) {
-  e.allowLocalModels = false;
-  e.allowRemoteModels = true;
-  e.remoteHost = remoteHost;
-  e.remotePathTemplate = "{model}";
-  e.useBrowserCache = false;
-}
-
-async function init() {
-  let name, fileBase;
-
+// Compute where the model lives (kept identical to the previous in-thread logic).
+// Returns a plain object safe to postMessage to the worker.
+//   - hub mode (VITE_MODEL_ID): transformers.js resolves the repo id natively at
+//     huggingface.co/<id>/resolve/main/. fileBase is the resolve URL the worker also
+//     uses for its direct fetches of gs_onnx.json / chat_template.jinja.
+//   - local mode (VITE_REPO_BASE, default "/repo"): a URL served alongside the app,
+//     treated as a remote fetch with remoteHost = REPO_BASE's parent + "{model}".
+function computeModelLocation() {
   if (MODEL_ID) {
-    // HF Hub mode (the Space config). transformers.js's DEFAULT remote resolution
-    // (huggingface.co + the standard {model}/resolve/{revision} template) already
-    // maps a repo id to its files, so we just enable remote models and leave the
-    // defaults in place. fileBase is the resolve URL for our direct fetches of
-    // gs_onnx.json / chat_template.jinja.
-    name = MODEL_ID;
-    fileBase = `https://huggingface.co/${MODEL_ID}/resolve/main`;
-    for (const e of [env, envForTokenizer]) {
-      e.allowLocalModels = false;
-      e.allowRemoteModels = true;
-      e.useBrowserCache = false; // dev convenience; the Hub is the source of truth
-    }
-  } else {
-    // Local/served-repo mode. REPO_BASE is a URL served alongside the app; treat
-    // it as a REMOTE fetch (transformers.js's file-existence Range probe only runs
-    // on the remote branch — the local branch is for fs paths, not URLs). Point
-    // remoteHost at REPO_BASE's parent + a flat "{model}" template so `<name>`
-    // maps to `${parent}/<name>/<file>`.
-    const baseUrl = new URL(REPO_BASE, window.location.href).href.replace(/\/$/, "");
-    const parent = baseUrl.slice(0, baseUrl.lastIndexOf("/") + 1);
-    name = baseUrl.slice(baseUrl.lastIndexOf("/") + 1);
-    fileBase = baseUrl;
-    const remoteHost = parent.replace(/\/$/, "");
-    configureRemote(env, remoteHost);
-    configureRemote(envForTokenizer, remoteHost);
+    return { mode: "hub", name: MODEL_ID, fileBase: `https://huggingface.co/${MODEL_ID}/resolve/main` };
   }
-
-  // ONNX Runtime Web only uses its multi-threaded WASM build when the page is
-  // cross-origin isolated (SharedArrayBuffer available). The bundled
-  // coi-serviceworker.js restores isolation on hosts that don't emit COEP (HF
-  // Static Spaces). Set the thread count explicitly from the isolation state —
-  // mirroring web/example/index-ort.html — so the single-threaded fallback is a
-  // clean, deliberate path rather than an ORT default, and tell the user when
-  // we're on it (single-threaded decode is slow and blocks the UI per token).
-  const threaded = self.crossOriginIsolated === true;
-  try {
-    const wasm = env.backends.onnx.wasm;
-    wasm.numThreads = threaded ? (navigator.hardwareConcurrency || 4) : 1;
-    // Proxy the ENTIRE ORT WASM backend (load, compile, AND every session.run)
-    // into a dedicated Web Worker. transformers.js defaults proxy=false, which
-    // runs all of that on the main thread — so even with multi-threaded intra-op
-    // the orchestrating run() call blocks the UI for seconds and the browser pops
-    // its "page unresponsive" dialog. proxy=true keeps the main thread free; it
-    // requires cross-origin isolation (the worker needs threaded WASM), which the
-    // coi-serviceworker now provides. Without isolation, leave proxy off (a proxy
-    // worker without SharedArrayBuffer buys nothing and complicates the slow path).
-    if (threaded) wasm.proxy = true;
-  } catch (_) { /* env shape varies across transformers.js versions; non-fatal */ }
-  if (!threaded) {
-    console.warn(
-      "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded and " +
-      "runs on the main thread. Generation will be slow and may freeze the tab. " +
-      "(coi-serviceworker should normally restore isolation after a one-time reload.)",
-    );
-  }
-
-  setStatus(`loading model (${DTYPE})…${threaded ? "" : " · single-threaded"}`);
-  progressLabel.textContent = "downloading model…";
-  // ONE shared load: all three adapters live in this single model; the control
-  // token (chosen per generation) selects which fires. No per-tab reload.
-  model = await loadGraniteSwitch(name, { dtype: DTYPE, progress_callback: onProgress });
-
-  setStatus("loading tokenizer…");
-  const meta = await (await fetch(`${fileBase}/gs_onnx.json`)).json();
-  const chatTemplateText = await (await fetch(`${fileBase}/chat_template.jinja`)).text();
-  tok = await GraniteSwitchTokenizer.load({
-    modelId: name, // resolves under the configured remote host/template
-    chatTemplateText,
-    meta,
-    // The tokenizer uses the dist/ AutoTokenizer + its paired env (see shim note).
-    AutoTokenizer,
-    env: envForTokenizer,
-  });
-
-  hideProgress();
-  setStatus("ready · loaded natively on transformers.js");
-  runBtn.disabled = false;
+  const baseUrl = new URL(REPO_BASE, window.location.href).href.replace(/\/$/, "");
+  const parent = baseUrl.slice(0, baseUrl.lastIndexOf("/") + 1);
+  const name = baseUrl.slice(baseUrl.lastIndexOf("/") + 1);
+  return { mode: "local", name, fileBase: baseUrl, remoteHost: parent.replace(/\/$/, "") };
 }
+
+// The model engine. Created once; all model work happens off the main thread.
+const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+
+// Per-column streaming state. Only one generation leg is in flight at a time
+// (compare() awaits base then adapter), so a small per-"which" map is unambiguous.
+const COLUMN = { base: () => baseOutEl, adapter: () => adapterOutEl };
+const accum = { base: "", adapter: "" };
+const tickers = { base: null, adapter: null };
+const resolvers = { base: null, adapter: null }; // resolve the in-flight leg's promise
+
+function finishLeg(which) {
+  tickers[which]?.stop();
+  tickers[which] = null;
+  resolvers[which]?.();
+  resolvers[which] = null;
+}
+
+worker.onmessage = (e) => {
+  const m = e.data;
+  switch (m.type) {
+    case "progress":
+      onProgress(m.data); // transformers.js event, nested under .data
+      break;
+    case "ready":
+      hideProgress();
+      setStatus("ready · loaded on transformers.js" + (m.threaded ? "" : " · single-threaded"));
+      if (!m.threaded) {
+        console.warn(
+          "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded. " +
+          "Generation will be slow. (coi-serviceworker should restore isolation after " +
+          "a one-time reload.)",
+        );
+      }
+      runBtn.disabled = false;
+      break;
+    case "update": {
+      // Append the incremental decoded chunk — tokens appear live in the column.
+      accum[m.which] += m.text;
+      COLUMN[m.which]().textContent = accum[m.which];
+      tickers[m.which]?.bump(m.numTokens, m.tps);
+      break;
+    }
+    case "complete":
+      // Base column keeps the streamed prose; adapter column swaps to the rendered
+      // view (MITRE id / slug / JSON) built from the authoritative full text.
+      if (m.which === "adapter") applyRender(adapterOutEl, activeAdapter.render(m.raw));
+      else baseOutEl.textContent = accum.base || m.raw || "(no output)";
+      finishLeg(m.which);
+      break;
+    case "error":
+      if (m.which) COLUMN[m.which]().textContent = "Error: " + m.message;
+      else setStatus("worker error: " + m.message);
+      console.error("worker error:", m.message);
+      finishLeg(m.which || "base");
+      finishLeg("adapter");
+      break;
+  }
+};
+worker.onerror = (e) => {
+  hideProgress();
+  setStatus("worker failed to load: " + (e.message || "see console"));
+  console.error(e);
+};
+
+// Kick off the one-time model load.
+setStatus(`loading model (${DTYPE})…`);
+progressLabel.textContent = "downloading model…";
+worker.postMessage({ type: "load", payload: { ...computeModelLocation(), dtype: DTYPE } });
 
 // ── Live inference indicator ───────────────────────────────────────────────────
-// ORT-web runs the decode on the main thread; each token is one `await session.run`,
-// which IS a real event-loop turn (transformers.js's generate loop awaits forward()
-// between every token — see modeling_utils.js). So a `streamer` that touches the DOM
-// per token paints, and a requestAnimationFrame ticker keeps a spinner moving even
-// while a single token is in flight. Together they make it obvious the page is busy
-// decoding, not hung.
+// The worker streams a decoded chunk per token; the column shows the text appearing
+// live. Alongside it, this ticker animates a spinner + elapsed + token-count + tps on
+// the STATUS line (not the column — the streamed text owns the column). The rAF loop
+// keeps the spinner moving smoothly between token messages; bump() folds in the live
+// token count / throughput reported by the worker.
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-// Animates a "running" line into `el` (spinner · elapsed · token count) until
-// stop() is called. Independent of the decode loop, so it moves even between tokens.
-function startTicker(el, phaseLabel) {
-  let raf = 0, frame = 0, tokens = 0;
+function startTicker(phaseLabel) {
+  let raf = 0, frame = 0, tokens = 0, tps = 0;
   const t0 = performance.now();
   const tick = () => {
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    el.textContent = `${SPIN[frame++ % SPIN.length]} ${phaseLabel} · ${secs}s · ${tokens} tokens`;
+    const tpsStr = tps > 0 ? ` · ${tps.toFixed(1)} tok/s` : "";
+    statusEl.textContent = `${SPIN[frame++ % SPIN.length]} ${phaseLabel} · ${secs}s · ${tokens} tok${tpsStr}`;
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
   return {
-    bump: () => { tokens++; },
+    bump: (n, t) => { if (typeof n === "number") tokens = n; if (typeof t === "number") tps = t; },
     stop: () => cancelAnimationFrame(raf),
   };
-}
-
-// One greedy generation for the active adapter. `useAdapter` toggles the control
-// token (adapter ON/OFF). `outEl` (optional) receives a live "decoding…" indicator
-// driven by the per-token streamer.
-async function generate(adapter, { useAdapter, outEl, phaseLabel }) {
-  const text = (promptEl.value || "").trim();
-  const encodeOpts = {
-    // Pass the EXPLICIT adapter name when ON (not `undefined`, which would always
-    // default to the first adapter and make every tab fire CTI); null => base.
-    adapterName: useAdapter ? adapter.name : null,
-    instruction: adapter.instruction || undefined,
-    wrapTag: adapter.wrapTag,
-  };
-  if (adapter.buildContent) {
-    const schema = (schemaEl.value || "").trim();
-    encodeOpts.buildContent = (a) => adapter.buildContent(a, schema);
-  }
-  const ids = tok.encode(text, encodeOpts);
-  const inputIds = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
-
-  // Drive a live "decoding…" indicator into the output card while tokens stream.
-  const ticker = outEl ? startTicker(outEl, phaseLabel ?? "decoding") : null;
-  // A minimal streamer: transformers.js calls put(all_ids) once for the prompt then
-  // put(new_ids) per generated step, and end() at the finish. We only count steps.
-  let prompted = false;
-  const streamer = ticker
-    ? {
-        put() { if (!prompted) { prompted = true; return; } ticker.bump(); },
-        end() {},
-      }
-    : null;
-
-  try {
-    const seq = await model.generate({
-      inputs: inputIds,
-      max_new_tokens: useAdapter ? adapter.adapterMaxNewTokens : adapter.baseMaxNewTokens,
-      do_sample: false,
-      num_beams: 1,
-      ...(streamer ? { streamer } : {}),
-    });
-    const out = Array.from(seq.tolist()[0], (v) => Number(v)).slice(ids.length);
-    return tok.decode(out).trim();
-  } finally {
-    ticker?.stop();
-  }
 }
 
 function applyRender(el, r) {
@@ -387,8 +319,37 @@ function applyRender(el, r) {
   else el.textContent = r.text;
 }
 
-// Run base (adapter OFF) and Granite Switch (adapter ON) on the same input,
-// side by side, for whichever adapter tab is active.
+// Post one generation leg to the worker and resolve when its "complete"/"error"
+// message arrives. `useAdapter` toggles the control token (adapter ON/OFF).
+function runLeg(which, adapter, useAdapter, phaseLabel) {
+  const text = (promptEl.value || "").trim();
+  const payload = {
+    which,
+    text,
+    // Pass the EXPLICIT adapter name when ON (not undefined, which would default to
+    // the first adapter and make every tab fire CTI); null => base model.
+    adapterName: useAdapter ? adapter.name : null,
+    instruction: adapter.instruction || undefined,
+    wrapTag: adapter.wrapTag,
+    maxNewTokens: useAdapter ? adapter.adapterMaxNewTokens : adapter.baseMaxNewTokens,
+  };
+  // text-to-json: buildContent is a main-thread function that can't cross postMessage,
+  // so build the trained `${query}${PREAMBLE}${schema}` string here and send it.
+  if (adapter.buildContent) {
+    payload.content = adapter.buildContent({ text }, (schemaEl.value || "").trim());
+  }
+
+  accum[which] = "";
+  COLUMN[which]().textContent = "";
+  tickers[which] = startTicker(phaseLabel);
+  const done = new Promise((res) => { resolvers[which] = res; });
+  worker.postMessage({ type: "generate", payload });
+  return done;
+}
+
+// Run base (adapter OFF) then Granite Switch (adapter ON) on the same input, side by
+// side, for whichever adapter tab is active. Sequential so the single model serves one
+// leg at a time and the per-column streaming state stays unambiguous.
 async function compare() {
   const adapter = activeAdapter;
   if ((promptEl.value || "").trim() === "") return;
@@ -399,25 +360,9 @@ async function compare() {
   baseOutEl.textContent = "…";
   adapterOutEl.textContent = "…";
   try {
-    // Base: no adapter. Tends to ramble in prose — give it room. The output card
-    // shows a live spinner · elapsed · token-count line while it decodes.
-    setStatus("running base model (adapter OFF)…");
-    const baseRaw = await generate(adapter, {
-      useAdapter: false, outEl: baseOutEl, phaseLabel: "base model decoding",
-    });
-    baseOutEl.textContent = baseRaw || "(no output)";
-
-    // Adapter: fires the control token; trained for this task's output shape.
-    setStatus(`running Granite Switch (${adapter.label})…`);
-    const adapterRaw = await generate(adapter, {
-      useAdapter: true, outEl: adapterOutEl, phaseLabel: `${adapter.label} decoding`,
-    });
-    applyRender(adapterOutEl, adapter.render(adapterRaw));
+    await runLeg("base", adapter, false, "base model decoding");
+    await runLeg("adapter", adapter, true, `${adapter.label} decoding`);
     setStatus("done");
-  } catch (e) {
-    adapterOutEl.textContent = "Error: " + (e?.message ?? String(e));
-    setStatus("error");
-    console.error(e);
   } finally {
     runBtn.disabled = false;
     runBtn.textContent = runLabel;
@@ -479,8 +424,5 @@ for (const a of ADAPTERS) {
 selectTab(ADAPTERS[0]);
 
 runBtn.addEventListener("click", compare);
-init().catch((e) => {
-  hideProgress();
-  setStatus("load failed: " + (e?.message ?? String(e)));
-  console.error(e);
-});
+// The worker load was kicked off above (worker.postMessage({type:"load",...})); its
+// "ready" message enables the Run button and its "progress" messages drive the bar.
