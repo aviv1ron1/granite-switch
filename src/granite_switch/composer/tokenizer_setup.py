@@ -95,6 +95,24 @@ def add_control_tokens(
     return adapter_token_ids, special_tokens
 
 
+def add_audio_token(tokenizer, marker: str = "<|audio|>") -> int:
+    """Add the audio placeholder marker token to the tokenizer.
+
+    Used for the audio cascade: this single special token is placed in the
+    prompt and the vLLM ASR processor replaces it with the transcript tokens at
+    request time (see granite_switch.vllm.audio). Registering it as one special
+    token keeps the processor's prompt-replacement match clean.
+
+    Must be called before the model's embedding resize so the new row is sized
+    in. Returns the marker's token id.
+    """
+    print(f"\nAdding audio marker token: {marker}")
+    tokenizer.add_special_tokens({"additional_special_tokens": [marker]})
+    token_id = tokenizer.convert_tokens_to_ids(marker)
+    print(f"  {marker}: {token_id}")
+    return token_id
+
+
 def configure_chat_template(
     tokenizer,
     discovered_adapters: List[Tuple[Optional[str], str, str, Optional[str]]],
