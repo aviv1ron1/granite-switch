@@ -58,23 +58,16 @@ print(out[0].outputs[0].text)
 
 The `<|audio|>` marker is where the transcript is spliced in.
 
-### OpenAI-compatible server
+### OpenAI-compatible server / chat API — not yet wired
 
-```bash
-vllm serve ./granite-switch-audio --port 8000
-```
-```python
-from openai import OpenAI
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="x")
-resp = client.chat.completions.create(
-    model="granite-switch-audio",
-    messages=[{"role": "user", "content": [
-        {"type": "text", "text": "Answer the question in the audio."},
-        {"type": "input_audio", "input_audio": {"data": "<base64-wav>", "format": "wav"}},
-    ]}],
-)
-print(resp.choices[0].message.content)
-```
+> **Status:** the chat path (and therefore the OpenAI server) does **not** work
+> yet. When a chat request carries an audio content part, vLLM renders the prompt
+> via the chat template, and the `<|audio|>` marker our processor replaces does
+> not end up in the rendered prompt — so prompt replacement fails
+> (`Failed to apply prompt replacement for mm_items['audio'][0]`). Making the
+> chat template emit the `<|audio|>` placeholder for audio messages is the
+> remaining integration step. Until then, use the Python `generate(...)` path
+> above, which places the marker explicitly.
 
 ## Design
 
