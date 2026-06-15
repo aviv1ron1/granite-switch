@@ -9,7 +9,10 @@ license: apache-2.0
 header: mini
 app_file: index.html
 # Cross-origin isolation enables the multi-threaded onnxruntime-web WASM build.
-# HF Static Spaces apply these headers to every response when set here.
+# NOTE: HF Static Spaces honor cross_origin_opener_policy but do NOT emit
+# cross_origin_embedder_policy, so these alone don't make the page isolated. The
+# bundled coi-serviceworker.js restores isolation client-side (COEP: credentialless)
+# after a one-time reload. These keys are kept for any host that does honor them.
 cross_origin_embedder_policy: require-corp
 cross_origin_opener_policy: same-origin
 cross_origin_resource_policy: cross-origin

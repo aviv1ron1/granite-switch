@@ -258,7 +258,28 @@ async function init() {
     configureRemote(envForTokenizer, remoteHost);
   }
 
-  setStatus(`loading model (${DTYPE})…`);
+  // ONNX Runtime Web only uses its multi-threaded WASM build when the page is
+  // cross-origin isolated (SharedArrayBuffer available). The bundled
+  // coi-serviceworker.js restores isolation on hosts that don't emit COEP (HF
+  // Static Spaces). Set the thread count explicitly from the isolation state —
+  // mirroring web/example/index-ort.html — so the single-threaded fallback is a
+  // clean, deliberate path rather than an ORT default, and tell the user when
+  // we're on it (single-threaded decode is slow and blocks the UI per token).
+  const threaded = self.crossOriginIsolated === true;
+  try {
+    env.backends.onnx.wasm.numThreads = threaded
+      ? (navigator.hardwareConcurrency || 4)
+      : 1;
+  } catch (_) { /* env shape varies across transformers.js versions; non-fatal */ }
+  if (!threaded) {
+    console.warn(
+      "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded. " +
+      "Generation will be slow and may briefly freeze the tab per token. " +
+      "(coi-serviceworker should normally restore isolation after a one-time reload.)",
+    );
+  }
+
+  setStatus(`loading model (${DTYPE})…${threaded ? "" : " · single-threaded"}`);
   progressLabel.textContent = "downloading model…";
   // ONE shared load: all three adapters live in this single model; the control
   // token (chosen per generation) selects which fires. No per-tab reload.

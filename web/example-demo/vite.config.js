@@ -2,7 +2,7 @@
 import { defineConfig } from "vite";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Vite's dev server falls back to index.html (HTTP 200) for ANY unknown path.
@@ -26,6 +26,25 @@ function stubNodeIo(stubPath) {
         return stubPath;
       }
       return null;
+    },
+  };
+}
+
+// Emit the vendored coi-serviceworker.js to dist/ ROOT, unhashed. It can't go through
+// public/ because the shipping (Space) build sets `publicDir: false` (HUB_MODE) to avoid
+// copying the local dev repo — which would silently drop the SW from the only build that
+// needs it. emitFile with a fixed fileName guarantees a stable root URL (the SW's own URL
+// becomes its scope) regardless of publicDir. See coi-serviceworker.js for why it exists.
+function emitCoiServiceWorker() {
+  const swPath = fileURLToPath(new URL("./coi-serviceworker.js", import.meta.url));
+  return {
+    name: "emit-coi-serviceworker",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "coi-serviceworker.js",
+        source: readFileSync(swPath, "utf8"),
+      });
     },
   };
 }
@@ -74,6 +93,7 @@ export default defineConfig({
   publicDir: HUB_MODE ? false : "public",
   plugins: [
     stubNodeIo(fileURLToPath(new URL("./stubs/io.js", import.meta.url))),
+    emitCoiServiceWorker(),
     repo404(),
   ],
   // transformers.js's src/ tree (and some transitive deps) reference Node globals

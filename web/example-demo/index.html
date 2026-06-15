@@ -4,6 +4,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- MUST be first: HF Static Spaces don't emit Cross-Origin-Embedder-Policy, so the
+         page isn't cross-origin isolated and onnxruntime-web falls back to single-threaded
+         WASM (which blocks the main thread → frozen page during inference). This service
+         worker re-injects COOP + COEP:credentialless client-side and reloads once so
+         crossOriginIsolated becomes true and ORT can use multi-threaded WASM. Served from
+         the site root (its own URL is the SW scope); see coi-serviceworker.js. -->
+    <script src="coi-serviceworker.js"></script>
     <title>Granite Switch 350M · one model, many skills</title>
     <style>
       :root { color-scheme: light dark; }
