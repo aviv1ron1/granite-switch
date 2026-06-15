@@ -267,14 +267,22 @@ async function init() {
   // we're on it (single-threaded decode is slow and blocks the UI per token).
   const threaded = self.crossOriginIsolated === true;
   try {
-    env.backends.onnx.wasm.numThreads = threaded
-      ? (navigator.hardwareConcurrency || 4)
-      : 1;
+    const wasm = env.backends.onnx.wasm;
+    wasm.numThreads = threaded ? (navigator.hardwareConcurrency || 4) : 1;
+    // Proxy the ENTIRE ORT WASM backend (load, compile, AND every session.run)
+    // into a dedicated Web Worker. transformers.js defaults proxy=false, which
+    // runs all of that on the main thread — so even with multi-threaded intra-op
+    // the orchestrating run() call blocks the UI for seconds and the browser pops
+    // its "page unresponsive" dialog. proxy=true keeps the main thread free; it
+    // requires cross-origin isolation (the worker needs threaded WASM), which the
+    // coi-serviceworker now provides. Without isolation, leave proxy off (a proxy
+    // worker without SharedArrayBuffer buys nothing and complicates the slow path).
+    if (threaded) wasm.proxy = true;
   } catch (_) { /* env shape varies across transformers.js versions; non-fatal */ }
   if (!threaded) {
     console.warn(
-      "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded. " +
-      "Generation will be slow and may briefly freeze the tab per token. " +
+      "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded and " +
+      "runs on the main thread. Generation will be slow and may freeze the tab. " +
       "(coi-serviceworker should normally restore isolation after a one-time reload.)",
     );
   }
