@@ -105,9 +105,16 @@ tokens.
   propagate to the LLM. Two models run sequentially (ASR then LLM).
 - **English by default** (`distil-whisper/distil-small.en`). Use `--asr-model`
   for multilingual.
-- **Audio runs on the base model.** Combining audio with an adapter (adapter
-  control tokens in an audio request) is future work.
 - One audio clip per request.
+
+## Audio + adapters
+
+Audio requests route through adapters exactly like text requests. The model sets
+`requires_raw_input_tokens = True` so vLLM passes the raw `input_ids` to the
+forward pass on the multimodal path; the switch then detects adapter control
+tokens as usual, and `embed_input_ids` applies the same token-exchange rewrite
+(control → substitute id) used for text — so an audio request that activates an
+adapter behaves identically to the text equivalent.
 
 ## Tests
 
