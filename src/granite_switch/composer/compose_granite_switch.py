@@ -62,6 +62,7 @@ from granite_switch.composer.adapter_discovery import (
 from granite_switch.composer.tokenizer_setup import (
     add_audio_token,
     add_control_tokens,
+    configure_audio_chat_template,
     configure_chat_template,
     get_alora_first_invocation_token_id,
 )
@@ -806,6 +807,10 @@ def build():
     normalized_type = getattr(base_config, "model_type", "").replace("_switch", "")
     if normalized_type.startswith("granite"):
         configure_chat_template(tokenizer, all_discovered)
+        if audio_enabled:
+            # Make the chat template emit <|audio|> for audio content parts so
+            # the OpenAI server / chat() path works (the ASR processor replaces it).
+            configure_audio_chat_template(tokenizer)
     else:
         print("  Skipping chat template configuration (non-Granite model)")
 

@@ -113,6 +113,44 @@ def add_audio_token(tokenizer, marker: str = "<|audio|>") -> int:
     return token_id
 
 
+def configure_audio_chat_template(tokenizer, marker: str = "<|audio|>") -> None:
+    """Make the chat template emit the audio marker for audio content parts.
+
+    The Granite content-part loop only handles ``entry.type == 'text'`` and
+    silently drops other parts. vLLM passes multimodal chat content to the
+    template as a *list of parts*, so without this the ``<|audio|>`` marker never
+    reaches the rendered prompt and the ASR processor's prompt replacement fails
+    (``Failed to apply prompt replacement for mm_items['audio'][0]``).
+
+    We inject an ``elif`` that appends the marker for any part whose ``type``
+    contains ``'audio'`` (covers ``audio`` / ``input_audio`` / ``audio_url``).
+    Call after :func:`configure_chat_template`, gated on audio being enabled.
+    """
+    template = tokenizer.chat_template
+    if template is None:
+        print("Warning: no chat template; skipping audio chat-template handling")
+        return
+
+    # The text-only branch of the Granite content-part loop:
+    old = (
+        "                    {%- set content.val = content.val + entry.text %}\n"
+        "                {%- endif %}"
+    )
+    if old not in template:
+        raise ValueError(
+            "Could not find the Granite content-part loop to inject audio "
+            "handling; the base chat template may have changed."
+        )
+    new = (
+        "                    {%- set content.val = content.val + entry.text %}\n"
+        "                {%- elif 'audio' in entry.type %}\n"
+        "                    {%- set content.val = content.val + '" + marker + "' %}\n"
+        "                {%- endif %}"
+    )
+    tokenizer.chat_template = template.replace(old, new, 1)
+    print(f"  Audio chat-template handling added (emits {marker} for audio parts)")
+
+
 def configure_chat_template(
     tokenizer,
     discovered_adapters: List[Tuple[Optional[str], str, str, Optional[str]]],
