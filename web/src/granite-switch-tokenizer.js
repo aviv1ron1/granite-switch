@@ -78,32 +78,57 @@ export class GraniteSwitchTokenizer {
    * Render a user message through the chat template (injecting the adapter
    * control token) and tokenize it to ids.
    *
-   * The adapter expects a specific prompt framing, not the raw input: an
-   * instruction line followed by the input wrapped in `<cti>…</cti>` tags
-   * (mirroring the barha/granite-switch-tiny Space). Pass `instruction` to apply
-   * that framing — without it the model receives an unframed prompt and returns
-   * garbage even though the control token fires. With it, the 350m CTI model
-   * returns a clean ATT&CK technique id (e.g. "T1105").
+   * Each adapter was trained on a SPECIFIC prompt framing, not the raw input;
+   * sending the wrong framing makes the model emit garbage even though the
+   * control token fires. The framing is two parts: an optional `instruction`
+   * line and an optional XML tag wrapping the input. Examples (all three live in
+   * the demo model):
+   *   - cti-technique-mapping: instruction + `<cti>…</cti>`  (the default tag)
+   *   - genai-attack-vector:   instruction + `<incident>…</incident>`
+   *   - text-to-json:          no instruction, no tag — query + schema preamble
+   *     (use `buildContent` to express that shape)
    *
-   * @param {string} text  the CTI sentence (or raw user content if no instruction)
+   * Backward compatibility: `wrapTag` defaults to `"cti"`, so an
+   * `encode(text, { instruction })` call produces the exact legacy framing
+   * `${instruction}\n\n<cti>\n${text}\n</cti>` (the goldens depend on this).
+   *
+   * @param {string} text  the input text (or raw user content if no instruction)
    * @param {object} [opts]
    * @param {string|null} [opts.adapterName]  adapter to activate; defaults to the
    *                                     first adapter in meta.adapter_names. Pass
    *                                     `null` EXPLICITLY to render WITHOUT firing
    *                                     any control token (the plain base model).
-   * @param {string} [opts.instruction]  instruction line; when set, the user
-   *                                     content becomes
-   *                                     `${instruction}\n\n<cti>\n${text}\n</cti>`
+   * @param {string} [opts.instruction]  instruction line prepended to the content.
+   * @param {string|null} [opts.wrapTag="cti"]  XML tag wrapping `text`. Default
+   *                                     `"cti"` preserves legacy behavior; pass
+   *                                     `"incident"` etc. for other adapters, or
+   *                                     `null`/`""` to not wrap.
+   * @param {(args: {text: string, instruction?: string, wrapTag?: string|null}) => string} [opts.buildContent]
+   *                                     full override of the user-message content;
+   *                                     when supplied, `instruction`/`wrapTag` are
+   *                                     ignored (use for the text-to-json format).
    * @param {boolean} [opts.addGenerationPrompt=true]
    * @returns {number[]} token ids
    */
-  encode(text, { adapterName, instruction, addGenerationPrompt = true } = {}) {
+  encode(text, { adapterName, instruction, wrapTag = "cti", buildContent, addGenerationPrompt = true } = {}) {
     // `adapterName: null` (explicit) => base model, no control token. `undefined`
     // => default to the first adapter. A truthy string => that adapter.
     const adapter = adapterName === null
       ? undefined
       : adapterName || (this.meta.adapter_names && this.meta.adapter_names[0]);
-    const content = instruction ? `${instruction}\n\n<cti>\n${text}\n</cti>` : text;
+    // Content framing: a full override wins; otherwise an instruction line plus
+    // an optional tag wrapper (default `<cti>` keeps the legacy path byte-identical);
+    // with no instruction the raw text passes through.
+    let content;
+    if (typeof buildContent === "function") {
+      content = buildContent({ text, instruction, wrapTag });
+    } else if (instruction) {
+      content = wrapTag
+        ? `${instruction}\n\n<${wrapTag}>\n${text}\n</${wrapTag}>`
+        : `${instruction}\n\n${text}`;
+    } else {
+      content = text;
+    }
     const rendered = this.tok.apply_chat_template(
       [{ role: "user", content }],
       {

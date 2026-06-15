@@ -56,19 +56,36 @@ python3 test/coi_server.py 8744 "$PWD/example-demo/dist"
 # open http://127.0.0.1:8744/index.html
 ```
 
-For a real deploy, point `VITE_REPO_BASE` at a **public HF Hub repo** instead of
-bundling 1.4 GB of weights into `dist/`:
+For a real deploy, point `VITE_MODEL_ID` at a **public HF Hub repo** so the weights
+are fetched from the Hub at runtime instead of being bundled into `dist/`. This is
+the shippable Space configuration — the flagship demo loads the multi-adapter model
+in its `int8` variant for a smaller, faster first download:
 
 ```bash
-VITE_REPO_BASE="https://huggingface.co/<org>/<repo>/resolve/main" npm run build
+VITE_MODEL_ID="barha/granite-switch-4.0-350m-demo-onnx" VITE_DTYPE=int8 npm run build
 ```
 
-(and set `env` to allow remote models — `main.js`'s `configureRemote` already
-drives the fetch via `remoteHost` + `remotePathTemplate`).
+`main.js` detects `VITE_MODEL_ID` and uses transformers.js's native Hub resolution
+(`huggingface.co/<id>/resolve/main`). `VITE_DTYPE` selects the ONNX variant
+(`fp32` | `int8` | `q4`); `loadGraniteSwitch` maps it to the matching
+`model[_int8].onnx` + `.onnx.data` sidecar. Omit `VITE_MODEL_ID` for the local
+`/repo` dev mode above (which uses `VITE_REPO_BASE`, default `/repo`).
+
+## The demo: one model, many skills
+
+`src/main.js` drives a tabbed UI — one tab per embedded adapter
+(`cti-technique-mapping`, `genai-attack-vector`, `text-to-json`). The model loads
+**once**; each tab fires a different adapter via its control token (the
+`adapterName` passed to `GraniteSwitchTokenizer.encode`). Each adapter has its own
+trained prompt framing, expressed per-tab in the `ADAPTERS` config: an `instruction`
++ `wrapTag` (`<cti>` / `<incident>`), or a `buildContent` override for the
+text-to-json schema-preamble format. Outputs are rendered per task: a MITRE ID→name
+for CTI, the matched attack-vector slug, or pretty-printed JSON.
 
 ## Verified
 
-The real `granite-switch-4.0-350m-cti` model loads natively in a Chrome tab (both
-`npm run dev` and the built `dist/`) and greedy-decodes the CTI prompt to `T1105`,
-matching the Python golden (`web/test/golden_text.json`). Screenshots in
-`docs/granite_switch_350m_native_tfjs_*.png`.
+The real `granite-switch-4.0-350m` multi-adapter model loads natively in a Chrome
+tab (both `npm run dev` and the built `dist/`). The CTI tab greedy-decodes the
+spearphishing prompt to `T1105`, matching the Python golden
+(`web/test/golden_text.json`); the legacy single-adapter `encode({ instruction })`
+framing is unchanged (regression-guarded by `web/test/validate_browser_path_node.mjs`).

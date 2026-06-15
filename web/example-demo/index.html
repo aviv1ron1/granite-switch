@@ -4,7 +4,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Granite Switch · CTI Technique Mapping</title>
+    <title>Granite Switch 350M · one model, many skills</title>
     <style>
       :root { color-scheme: light dark; }
       body {
@@ -15,12 +15,21 @@
       .desc { color: #888; font-size: .92rem; }
       .desc a { color: #6366f1; }
       textarea { width: 100%; min-height: 5rem; font: inherit; padding: .6rem; box-sizing: border-box; border-radius: 6px; }
+      textarea.schema { min-height: 3.5rem; font-family: ui-monospace, monospace; font-size: .85rem; }
+      label { font-size: .9rem; }
       button { font: inherit; padding: .55rem 1.1rem; cursor: pointer; border-radius: 6px;
         border: none; background: #6366f1; color: #fff; }
       button:disabled { opacity: .5; cursor: default; }
+      /* Tab strip */
+      .tabs { display: flex; gap: .4rem; flex-wrap: wrap; border-bottom: 1px solid #8883; margin: 1.2rem 0 1rem; }
+      .tab { background: transparent; color: inherit; border: none; border-bottom: 2px solid transparent;
+        border-radius: 0; padding: .5rem .8rem; font-size: .9rem; }
+      .tab[aria-selected="true"] { border-bottom-color: #6366f1; font-weight: 600; }
+      .tab-blurb { color: #888; font-size: .9rem; margin: 0 0 1rem; min-height: 1.2em; }
       .examples { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 1rem; }
       .example { font-size: .82rem; padding: .3rem .6rem; border: 1px solid #8884; border-radius: 999px;
         background: transparent; color: inherit; cursor: pointer; }
+      .field { margin: .6rem 0; }
       .row { display: flex; gap: .6rem; align-items: center; margin: .8rem 0; }
       .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
       @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
@@ -29,6 +38,9 @@
       .out { white-space: pre-wrap; word-break: break-word; min-height: 2.5rem; }
       .out .tid { font-size: 1.3rem; font-weight: 700; font-family: ui-monospace, monospace; }
       .out .tname { font-size: 1.05rem; }
+      .out .slug { font-size: 1.3rem; font-weight: 700; font-family: ui-monospace, monospace;
+        background: #6366f133; padding: .15rem .5rem; border-radius: 6px; }
+      .out pre.json { margin: 0; font-family: ui-monospace, monospace; font-size: .85rem; white-space: pre-wrap; }
       .status { font-size: .85rem; color: #888; min-height: 1.2em; }
       code { background: #0001; padding: .1rem .3rem; border-radius: 3px; }
       progress {
@@ -43,21 +55,20 @@
     </style>
   </head>
   <body>
-    <h1>🛡️ Granite Switch 4.0 350M — CTI Technique Mapping</h1>
+    <h1>🪶 Granite Switch 4.0 350M — one model, many skills</h1>
     <p class="desc">
-      The <strong>same base model</strong> answers a <strong>cyber threat
-      intelligence (CTI)</strong> prompt two ways. Without the adapter it rambles
-      in prose; flip on the embedded <code>cti-technique-mapping</code> LoRA (via a
-      single control token) and it emits the one matching
-      <a href="https://attack.mitre.org/">MITRE ATT&amp;CK</a> technique ID — which
-      we resolve to its name.
+      <strong>One</strong> base model (<code>ibm-granite/granite-4.0-350m</code>) with
+      <strong>three embedded LoRA adapters</strong> in a single checkpoint. A single
+      <strong>control token</strong> switches between skills per request — no weight
+      reloading. Each tab below runs your input twice: once with the adapter
+      <strong>OFF</strong> (plain base model, rambles in prose) and once <strong>ON</strong>
+      (the adapter's clean, structured output).
       <br />
-      Runs <strong>fully client-side</strong> in your browser:
-      <code>AutoModelForCausalLM.from_pretrained</code> loads
-      <a href="https://huggingface.co/barha/granite-switch-4.0-350m-cti-onnx">the ONNX
-      model</a> on transformers.js (native <code>granite_switch</code> architecture).
-      Base: <code>ibm-granite/granite-4.0-350m</code> · Adapter:
-      <code>cti-technique-mapping</code> (LoRA, attention + MLP).
+      Runs <strong>fully client-side</strong> in your browser via
+      <code>AutoModelForCausalLM.from_pretrained</code> on transformers.js (native
+      <code>granite_switch</code> architecture), loading
+      <a href="https://huggingface.co/barha/granite-switch-4.0-350m-demo-onnx">the ONNX
+      model</a> (int8 — first load downloads ~440&nbsp;MB).
     </p>
 
     <div class="progress-wrap" id="progress-wrap">
@@ -65,8 +76,18 @@
       <div class="progress-label" id="progress-label">loading model…</div>
     </div>
 
-    <label for="prompt"><strong>CTI text</strong></label>
-    <textarea id="prompt" placeholder="Describe the observed adversary behavior…">The actor used PowerShell to download and execute a payload from a remote server.</textarea>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <p class="tab-blurb" id="tab-blurb"></p>
+
+    <div class="field">
+      <label for="prompt"><strong id="input-label">Input</strong></label>
+      <textarea id="prompt" placeholder="…"></textarea>
+    </div>
+
+    <div class="field" id="schema-wrap" hidden>
+      <label for="schema"><strong>JSON schema</strong></label>
+      <textarea id="schema" class="schema" placeholder='{"type": "object", "properties": {…}}'></textarea>
+    </div>
 
     <div class="examples" id="examples"></div>
 
