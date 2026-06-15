@@ -163,8 +163,9 @@ export default defineConfig({
     // resolution, so the io.js stub must be listed here explicitly — otherwise the
     // worker pulls transformers.js's real utils/io.js (node:fs/stream) and the build
     // fails. (resolve.alias/define DO carry over, so the shim alias + process shims
-    // don't need repeating.)
-    plugins: [stubNodeIo(fileURLToPath(new URL("./stubs/io.js", import.meta.url)))],
+    // don't need repeating.) Vite 6 requires this be a FUNCTION returning the plugin
+    // array (a fresh instance per worker build), not a bare array.
+    plugins: () => [stubNodeIo(fileURLToPath(new URL("./stubs/io.js", import.meta.url)))],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

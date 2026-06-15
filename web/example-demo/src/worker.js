@@ -28,11 +28,26 @@ import { TextStreamer } from "@huggingface/transformers";
 let model = null;
 let tok = null;
 
-// ORT thread/proxy config lives here because it configures the same shim `env`
-// instance this worker's model uses. We're already in a worker, so proxy=false:
-// proxy would spawn a SECOND worker for the WASM backend, adding needless hops.
-// Multi-threaded intra-op still requires cross-origin isolation (SharedArrayBuffer),
-// which coi-serviceworker provides on the page (and thus in this worker too).
+// Pick the ONNX Runtime execution provider the framework-native way: prefer
+// WebGPU (the model matmuls run on the GPU — Metal on a Mac, ~several× faster than
+// WASM for both prefill and decode), else WASM/CPU. transformers.js accepts
+// `device:"webgpu"` and would fall back internally, but probing navigator.gpu lets
+// us REPORT the choice in the UI and skip a doomed WebGPU attempt on browsers that
+// don't support it. The value flows from_pretrained -> constructSessions ->
+// getSession -> selectDevice (transformers.js src/models/session.js).
+function pickDevice() {
+  try {
+    if (typeof navigator !== "undefined" && navigator.gpu) return "webgpu";
+  } catch (_) { /* navigator/gpu absent in some worker hosts */ }
+  return "wasm";
+}
+
+// WASM thread/proxy config. Only load-bearing on the WASM fallback path; on WebGPU
+// the matmuls don't run in WASM so numThreads is moot. Configures the same shim
+// `env` instance this worker's model uses. We're already in a worker, so
+// proxy=false: proxy would spawn a SECOND worker for the WASM backend, adding
+// needless hops. Multi-threaded intra-op still requires cross-origin isolation
+// (SharedArrayBuffer), which coi-serviceworker provides on the page (and worker).
 function configureOrt() {
   const threaded = self.crossOriginIsolated === true;
   try {
@@ -65,11 +80,15 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost }) {
   }
 
   const threaded = configureOrt();
+  const device = pickDevice();
 
   // ONE shared load: all three adapters live in this single model; the control
-  // token (chosen per generation) selects which fires. Forward progress events on.
+  // token (chosen per generation) selects which fires. `device` selects the EP for
+  // BOTH the decode and (when present) the prefill session inside loadGraniteSwitch.
+  // Forward progress events on.
   model = await loadGraniteSwitch(name, {
     dtype,
+    device,
     progress_callback: (ev) => self.postMessage({ type: "progress", data: ev }),
   });
 
@@ -84,7 +103,10 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost }) {
     env: envForTokenizer,
   });
 
-  self.postMessage({ type: "ready", threaded });
+  // Report whether a stateful prefill session loaded (vs the per-token replay
+  // fallback) so the UI / console can distinguish the fast path.
+  const prefill = !!(model?.sessions && model.sessions.prefill);
+  self.postMessage({ type: "ready", threaded, device, prefill });
 }
 
 // One greedy generation, streaming decoded chunks back per token. `which` ("base" |

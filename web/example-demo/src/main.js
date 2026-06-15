@@ -244,18 +244,29 @@ worker.onmessage = (e) => {
     case "progress":
       onProgress(m.data); // transformers.js event, nested under .data
       break;
-    case "ready":
+    case "ready": {
       hideProgress();
-      setStatus("ready · loaded on transformers.js" + (m.threaded ? "" : " · single-threaded"));
-      if (!m.threaded) {
+      // Show the live execution provider. WebGPU runs the matmuls on the GPU; WASM
+      // is the CPU fallback (and notes single-threaded when not cross-origin isolated).
+      const epNote =
+        m.device === "webgpu" ? " · webgpu" : " · wasm" + (m.threaded ? "" : " · single-threaded");
+      setStatus("ready · loaded on transformers.js" + epNote);
+      if (m.device !== "webgpu" && !m.threaded) {
         console.warn(
           "Page is NOT cross-origin isolated → onnxruntime-web is single-threaded. " +
           "Generation will be slow. (coi-serviceworker should restore isolation after " +
           "a one-time reload.)",
         );
       }
+      if (m.prefill === false) {
+        console.warn(
+          "No stateful prefill session — falling back to per-token prompt replay " +
+          "(slower first token). Re-export the model with a state-emitting prefill graph.",
+        );
+      }
       runBtn.disabled = false;
       break;
+    }
     case "update": {
       // Append the incremental decoded chunk — tokens appear live in the column.
       accum[m.which] += m.text;
