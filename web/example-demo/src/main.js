@@ -47,6 +47,7 @@ const ADAPTERS = [
   {
     name: "cti-technique-mapping",
     label: "CTI → ATT&CK",
+    repo: "barha/granite-cti-technique-mapping-350m-alora",
     blurb: "Maps a cyber-threat-intelligence procedure sentence to the one matching MITRE ATT&CK technique ID.",
     outputDesc: "→ a MITRE ATT&CK technique ID (e.g. T1059.001)",
     instruction: "What ATT&CK technique does the following CTI procedure sentence describe?",
@@ -67,6 +68,7 @@ const ADAPTERS = [
   {
     name: "genai-attack-vector",
     label: "GenAI attack vector",
+    repo: "barha/granite-genai-attack-vector-350m-alora",
     blurb: "Classifies a GenAI security incident into one attack-vector label (14-way closed set).",
     outputDesc: "→ one of 14 attack-vector labels (e.g. prompt-injection)",
     instruction: "What attack vector does the following GenAI security incident describe?",
@@ -87,6 +89,7 @@ const ADAPTERS = [
   {
     name: "text-to-json",
     label: "Text → JSON",
+    repo: "barha/granite-text-to-json-350m-alora",
     blurb: "Turns a natural-language request plus a JSON schema into a populated JSON object that conforms to the schema.",
     outputDesc: "→ a JSON object conforming to your schema",
     instruction: null, // no instruction line, no tag — schema preamble instead
@@ -247,6 +250,9 @@ const resolvers = { base: null, adapter: null }; // resolve the in-flight leg's 
 // The templated prompt (after chat template) of the most recent run, per leg — fed
 // into the "View raw prompt" panel once both legs of a Compare have completed.
 const lastPrompts = { base: "", adapter: "" };
+// The raw generated text of the most recent run, per leg — appended after the prompt
+// in the "View raw prompt" panel so the full sequence (prompt + completion) is visible.
+const lastOutputs = { base: "", adapter: "" };
 
 function finishLeg(which) {
   tickers[which]?.stop();
@@ -298,6 +304,8 @@ worker.onmessage = (e) => {
       else baseOutEl.textContent = accum.base || m.raw || "(no output)";
       // Stash this leg's templated prompt (after chat template) for the raw-prompt viewer.
       if (typeof m.prompt === "string") lastPrompts[m.which] = m.prompt;
+      // Stash the leg's raw completion too, so the viewer can show prompt + output.
+      lastOutputs[m.which] = accum[m.which] || m.raw || "";
       finishLeg(m.which);
       break;
     case "error":
@@ -358,9 +366,17 @@ function renderPromptView(adapter) {
   const escToken = escapeHtml(token);
   const highlight = (s) =>
     escapeHtml(s).split(escToken).join(`<span class="ctrl-tok">${escToken}</span>`);
+  // Render one leg as: highlighted/escaped prompt, then the model's completion wrapped
+  // in a <span class="completion"> so it's visually distinct from the fed-in prompt.
+  const leg = (prompt, output, hl) => {
+    if (!prompt) return "—";
+    const head = hl ? highlight(prompt) : escapeHtml(prompt);
+    if (!output) return head;
+    return head + `<span class="completion">${escapeHtml(output)}</span>`;
+  };
 
-  promptBaseEl.innerHTML = lastPrompts.base ? escapeHtml(lastPrompts.base) : "—";
-  promptAdapterEl.innerHTML = lastPrompts.adapter ? highlight(lastPrompts.adapter) : "—";
+  promptBaseEl.innerHTML = leg(lastPrompts.base, lastOutputs.base, false);
+  promptAdapterEl.innerHTML = leg(lastPrompts.adapter, lastOutputs.adapter, true);
   promptViewEl.hidden = false;
 }
 
@@ -370,11 +386,15 @@ function renderAdapterCards() {
   for (const a of ADAPTERS) {
     const card = document.createElement("div");
     card.className = "adapter-card";
+    const link = a.repo
+      ? `<br /><a class="ac-link" href="https://huggingface.co/${escapeHtml(a.repo)}" target="_blank" rel="noopener">${escapeHtml(a.repo)}</a>`
+      : "";
     card.innerHTML =
       `<span class="ac-label">${escapeHtml(a.label)}</span>` +
       `<span class="tok">${escapeHtml(controlTokenOf(a))}</span><br />` +
       `${escapeHtml(a.blurb)}<br />` +
-      `<span class="ac-out">${escapeHtml(a.outputDesc)}</span>`;
+      `<span class="ac-out">${escapeHtml(a.outputDesc)}</span>` +
+      link;
     adapterCardsEl.appendChild(card);
   }
 }
@@ -420,6 +440,7 @@ async function compare() {
   baseOutEl.textContent = "…";
   adapterOutEl.textContent = "…";
   lastPrompts.base = lastPrompts.adapter = "";
+  lastOutputs.base = lastOutputs.adapter = "";
   try {
     await runLeg("base", adapter, false, "base model decoding");
     await runLeg("adapter", adapter, true, `${adapter.label} decoding`);
@@ -474,6 +495,7 @@ function selectTab(adapter) {
   // this tab is run so it can't show a mismatched (other-adapter) prompt.
   promptViewEl.hidden = true;
   lastPrompts.base = lastPrompts.adapter = "";
+  lastOutputs.base = lastOutputs.adapter = "";
   renderExampleChips(adapter);
 }
 

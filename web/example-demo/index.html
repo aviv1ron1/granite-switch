@@ -64,6 +64,8 @@
       .adapter-card .ac-label { font-weight: 600; display: block; margin-bottom: .15rem; }
       .adapter-card .tok { font-family: ui-monospace, monospace; color: #6366f1; font-size: .8rem; }
       .adapter-card .ac-out { color: #888; }
+      .adapter-card .ac-link { display: inline-block; margin-top: .35rem; font-family: ui-monospace, monospace;
+        font-size: .76rem; color: #6366f1; word-break: break-all; }
       /* Raw-prompt viewer */
       details.prompt-view { margin: 1rem 0; border: 1px solid #8883; border-radius: 8px; padding: 0 1rem; }
       details.prompt-view > summary { cursor: pointer; padding: .7rem 0; font-size: .9rem; font-weight: 600; }
@@ -76,6 +78,10 @@
         white-space: pre-wrap; word-break: break-word; background: #0001; padding: .6rem; border-radius: 6px;
         max-height: 22rem; overflow: auto; }
       .ctrl-tok { background: #6366f133; color: #6366f1; font-weight: 700; border-radius: 4px; padding: 0 .15rem; }
+      /* Model completion appended after the prompt in the raw-prompt viewer — tinted
+         green and underlined so the generated text is unmistakable from the fed-in prompt. */
+      .completion { background: #22c55e22; color: #16a34a; border-radius: 3px;
+        text-decoration: underline; text-decoration-color: #22c55e88; text-underline-offset: .15em; }
       progress {
         width: 100%; height: .7rem; appearance: none; -webkit-appearance: none;
         border: none; border-radius: 999px; overflow: hidden; background: #0001;
@@ -91,9 +97,9 @@
     <h1>🪶 Granite Switch 4.0 350M — one model, many skills</h1>
     <p class="desc">
       <strong>One</strong> base model (<code>ibm-granite/granite-4.0-350m</code>) with
-      <strong>three embedded LoRA adapters</strong> in a single checkpoint. A single
-      <strong>control token</strong> switches between skills per request — no weight
-      reloading. Each tab below runs your input twice: once with the adapter
+      <strong>three embedded activated-LoRA (aLoRA) adapters</strong> in a single
+      checkpoint. A single <strong>control token</strong> switches between skills per
+      request — no weight reloading. Each tab below runs your input twice: once with the adapter
       <strong>OFF</strong> (plain base model, rambles in prose) and once <strong>ON</strong>
       (the adapter's clean, structured output).
       <br />
@@ -120,10 +126,13 @@
         model for one task. Granite Switch <strong>embeds several adapters in one
         checkpoint</strong> and turns exactly one on per request via its
         <strong>control token</strong>. These are <strong>activated LoRA (aLoRA)</strong>
-        adapters, so the chat template places that token <strong>right before the assistant
+        adapters: trained so the adapter switches on at a specific point in the sequence,
+        the chat template places that control token <strong>right before the assistant
         turn</strong> (<code>&lt;|start_of_role|&gt;assistant&lt;|end_of_role|&gt;</code>) —
-        it fires the switch exactly where generation begins, not at the start of the prompt.
-        No adapter is loaded or swapped at runtime; the same forward pass routes through the
+        firing the switch exactly where generation begins, so the prompt is read by the
+        base model and only the answer is generated through the adapter. (A plain LoRA would
+        put the token at the very start and run the whole prompt through the adapter.) No
+        adapter is loaded or swapped at runtime; the same forward pass routes through the
         selected adapter's deltas.
       </p>
       <ol>
@@ -177,9 +186,10 @@
     <details class="prompt-view" id="prompt-view" hidden>
       <summary>View raw prompt (after chat template)</summary>
       <p class="prompt-hint">
-        The exact text fed to the model for the last run, after the chat template. The adapter
-        side injects the <span class="ctrl-tok">control token</span> that fires the switch; the
-        base side is the identical framing without it.
+        The exact text fed to the model for the last run, after the chat template, followed by the
+        <span class="completion">model's completion</span>. The adapter side injects the
+        <span class="ctrl-tok">control token</span> that fires the switch; the base side is the
+        identical framing without it.
       </p>
       <div class="prompt-cols">
         <div class="prompt-col">
