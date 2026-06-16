@@ -38,6 +38,9 @@ export class GraniteSwitchTokenizer {
    * @param {string} [opts.modelName]       subdir under localModelPath (local load)
    * @param {string} opts.chatTemplateText  contents of chat_template.jinja
    * @param {object} [opts.meta]            gs_onnx.json metadata (for adapter names)
+   * @param {string} [opts.revision]        commit SHA / branch / tag to pin the load to.
+   *   When set, browser caching stays ON (loads are pinned, so a re-export under a new
+   *   SHA gets fresh cache-key URLs); when omitted, the cache is wiped to avoid staleness.
    * @param {object} [opts.AutoTokenizer]  transformers.js AutoTokenizer to use
    *   (default: the package-root import). Pass the SAME instance the model uses
    *   when the app is bound to transformers.js's `src/` tree (e.g. via the native
@@ -45,26 +48,28 @@ export class GraniteSwitchTokenizer {
    * @param {object} [opts.env]            matching transformers.js `env` object.
    */
   static async load({
-    modelId, localModelPath, modelName, chatTemplateText, meta,
+    modelId, localModelPath, modelName, chatTemplateText, meta, revision,
     AutoTokenizer = DefaultAutoTokenizer, env = defaultEnv,
   }) {
-    // Avoid serving a STALE tokenizer from transformers.js' browser cache
-    // (Cache Storage `transformers-cache`). When a model is re-exported under
-    // the same name, a previously cached tokenizer is otherwise returned — e.g.
-    // an old control-token spelling — so the adapter control token silently
-    // fails to fire. `env.useBrowserCache = false` is not reliably honored, so
-    // we also evict the cache outright. Guarded for Node, where `caches` is
-    // absent (and there is no browser cache to worry about).
-    env.useBrowserCache = false;
-    if (typeof caches !== "undefined") {
-      try { await caches.delete("transformers-cache"); } catch (_) { /* best effort */ }
+    // Stale-tokenizer hazard: transformers.js caches by URL, so a model re-exported
+    // under the same name+branch would otherwise serve an old cached tokenizer (e.g.
+    // an old control-token spelling) and the adapter control token would silently fail
+    // to fire. We avoid that by PINNING the load to a commit SHA (`revision`) — a
+    // re-export gets a new SHA, hence new cache-key URLs, so the cache never goes
+    // stale. When a revision is given, browser caching is left ON (reloads reuse files);
+    // without one (legacy callers), we keep the old belt-and-suspenders eviction.
+    if (!revision) {
+      env.useBrowserCache = false;
+      if (typeof caches !== "undefined") {
+        try { await caches.delete("transformers-cache"); } catch (_) { /* best effort */ }
+      }
     }
 
     let tok;
     if (modelId) {
       env.allowRemoteModels = true;
       env.allowLocalModels = false;
-      tok = await AutoTokenizer.from_pretrained(modelId);
+      tok = await AutoTokenizer.from_pretrained(modelId, revision ? { revision } : {});
     } else {
       env.allowLocalModels = true;
       env.allowRemoteModels = false;

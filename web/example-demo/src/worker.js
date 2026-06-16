@@ -67,12 +67,15 @@ function configureRemote(e, remoteHost) {
   e.useBrowserCache = false;
 }
 
-async function handleLoad({ mode, name, fileBase, dtype, remoteHost }) {
+async function handleLoad({ mode, name, fileBase, dtype, remoteHost, revision }) {
   if (mode === "hub") {
     for (const e of [env, envForTokenizer]) {
       e.allowLocalModels = false;
       e.allowRemoteModels = true;
-      e.useBrowserCache = false; // the Hub is the source of truth
+      // Cache model files in browser Cache Storage so reloads don't re-download
+      // ~440MB. Safe because loads are pinned to a commit SHA (`revision`): a
+      // re-export lands on new /resolve/<sha>/ URLs and misses the stale cache.
+      e.useBrowserCache = true;
     }
   } else {
     configureRemote(env, remoteHost);
@@ -89,6 +92,7 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost }) {
   model = await loadGraniteSwitch(name, {
     dtype,
     device,
+    revision, // pin to a commit SHA (hub mode) so cached files stay correct
     progress_callback: (ev) => self.postMessage({ type: "progress", data: ev }),
   });
 
@@ -97,6 +101,7 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost }) {
   const chatTemplateText = await (await fetch(`${fileBase}/chat_template.jinja`)).text();
   tok = await GraniteSwitchTokenizer.load({
     modelId: name,
+    revision,
     chatTemplateText,
     meta,
     AutoTokenizer,

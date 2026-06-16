@@ -228,9 +228,31 @@ let activeAdapter = ADAPTERS[0];
 //     uses for its direct fetches of gs_onnx.json / chat_template.jinja.
 //   - local mode (VITE_REPO_BASE, default "/repo"): a URL served alongside the app,
 //     treated as a remote fetch with remoteHost = REPO_BASE's parent + "{model}".
-function computeModelLocation() {
+// Resolve the Hub model's current commit SHA so loads can be PINNED to it. This is
+// what makes browser caching safe: transformers.js keys its Cache Storage by URL, so
+// pinning every fetch to /resolve/<sha>/ means a future re-export (new SHA) lands on
+// fresh URLs and naturally misses the stale cache — no manual cache wipe needed.
+// Best-effort: on any failure we fall back to the "main" branch (uncached-but-correct).
+async function resolveRevision(modelId) {
+  try {
+    const r = await fetch(`https://huggingface.co/api/models/${modelId}/revision/main`);
+    if (r.ok) {
+      const sha = (await r.json())?.sha;
+      if (typeof sha === "string" && sha.length) return sha;
+    }
+  } catch (_) { /* offline / API change — fall back to main */ }
+  return "main";
+}
+
+async function computeModelLocation() {
   if (MODEL_ID) {
-    return { mode: "hub", name: MODEL_ID, fileBase: `https://huggingface.co/${MODEL_ID}/resolve/main` };
+    const revision = await resolveRevision(MODEL_ID);
+    return {
+      mode: "hub", name: MODEL_ID, revision,
+      // Pin direct fetches (gs_onnx.json / chat_template.jinja) to the same revision
+      // so they share the revision-keyed cache with the model files.
+      fileBase: `https://huggingface.co/${MODEL_ID}/resolve/${revision}`,
+    };
   }
   const baseUrl = new URL(REPO_BASE, window.location.href).href.replace(/\/$/, "");
   const parent = baseUrl.slice(0, baseUrl.lastIndexOf("/") + 1);
@@ -323,10 +345,14 @@ worker.onerror = (e) => {
   console.error(e);
 };
 
-// Kick off the one-time model load.
+// Kick off the one-time model load. Resolve the model revision first (hub mode) so the
+// load can be pinned to a commit SHA — cached across reloads, auto-invalidated on
+// re-export.
 setStatus(`loading model (${DTYPE})…`);
 progressLabel.textContent = "downloading model…";
-worker.postMessage({ type: "load", payload: { ...computeModelLocation(), dtype: DTYPE } });
+computeModelLocation().then((loc) => {
+  worker.postMessage({ type: "load", payload: { ...loc, dtype: DTYPE } });
+});
 
 // ── Live inference indicator ───────────────────────────────────────────────────
 // The worker streams a decoded chunk per token; the column shows the text appearing
