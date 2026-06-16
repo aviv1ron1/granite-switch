@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Granite Switch browser demo — UI thread. ALL model work runs in worker.js.
 //
-// "One model, many skills": a SINGLE 350m checkpoint embeds three LoRA adapters,
-// each fired by its own control token — no weight reloading between tasks. The UI
+// "One model, many skills": a SINGLE 350m checkpoint embeds three aLoRA adapters,
+// each fired by its own control token (placed before the assistant turn) — no weight
+// reloading between tasks. The UI
 // is one tab per adapter; each tab runs the same input twice (adapter OFF = base
 // prose, adapter ON = the adapter's structured output) so the lift is visible.
 //
@@ -36,9 +37,10 @@ const SCHEMA_PREAMBLE = "\n\nRespond with a JSON object conforming to this schem
 // ── Per-adapter configuration ─────────────────────────────────────────────────
 // `name` MUST equal the adapter name in gs_onnx.json so the right control token
 // fires. `render(raw)` returns { html } (trusted, pre-escaped) or { text }.
-// Each adapter's control token is its name wrapped in `<|…|>` (LoRA adapters; the
-// chat template prepends it at the sequence start). Kept as a function so the cards
-// and the raw-prompt highlight derive the exact spelling from `name`.
+// Each adapter's control token is its name wrapped in `<|…|>` (aLoRA adapters; the
+// chat template places it right before the assistant turn, not at the sequence start).
+// Kept as a function so the cards and the raw-prompt highlight derive the exact
+// spelling from `name`.
 const controlTokenOf = (a) => `<|${a.name}|>`;
 
 const ADAPTERS = [

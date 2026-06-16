@@ -118,15 +118,19 @@
       <p>
         A LoRA adapter is a small set of low-rank weight deltas that specializes the base
         model for one task. Granite Switch <strong>embeds several adapters in one
-        checkpoint</strong> and turns exactly one on per request by prepending its
-        <strong>control token</strong> to the prompt — the chat template does this
-        automatically when you name an adapter. No adapter is loaded or swapped at runtime;
-        the same forward pass routes through the selected adapter's deltas.
+        checkpoint</strong> and turns exactly one on per request via its
+        <strong>control token</strong>. These are <strong>activated LoRA (aLoRA)</strong>
+        adapters, so the chat template places that token <strong>right before the assistant
+        turn</strong> (<code>&lt;|start_of_role|&gt;assistant&lt;|end_of_role|&gt;</code>) —
+        it fires the switch exactly where generation begins, not at the start of the prompt.
+        No adapter is loaded or swapped at runtime; the same forward pass routes through the
+        selected adapter's deltas.
       </p>
       <ol>
         <li>You pick a tab (= an adapter) and enter input.</li>
         <li>The chat template wraps your input in the adapter's trained framing and injects
-            its control token (e.g. <code>&lt;|cti-technique-mapping|&gt;</code>).</li>
+            its control token (e.g. <code>&lt;|cti-technique-mapping|&gt;</code>) just before
+            the assistant turn.</li>
         <li>We run the <strong>same</strong> input twice — adapter <strong>OFF</strong> (plain
             base model) vs <strong>ON</strong> — so the structured lift is visible side by side.</li>
       </ol>
