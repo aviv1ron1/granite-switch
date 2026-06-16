@@ -19,7 +19,6 @@ const meta = JSON.parse(readFileSync(join(modelDir, "gs_onnx.json"), "utf8"));
 const golden = JSON.parse(readFileSync(join(modelDir, "golden.json"), "utf8"));
 
 const gs = await GraniteSwitch.load(ort, {
-  prefillPath: join(modelDir, "prefill.onnx"),
   decodePath: join(modelDir, "decode.onnx"),
   meta,
   executionProviders: ["cpu"], // onnxruntime-node

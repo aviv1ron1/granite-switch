@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""GATE 3: KV-cached decode (with threaded switch state) matches full prefill.
+"""GATE 3: KV-cached step-by-step decode matches the full HF forward.
 
 Builds the tiny model, computes full-sequence HF logits as reference, then runs
-the exported single-token decode graph step-by-step (seeding past state from a
-short prefix) and checks the per-step logits match HF at each absolute position
-— including positions *after* a control token, which exercises the cumulative
-switch state threading.
+the exported single decode graph step-by-step (seeding past state from an empty
+past, one token at a time) and checks the per-step logits match HF at each
+absolute position — including positions *after* a control token, which exercises
+the cumulative switch state threading. Uses the production
+:func:`granite_switch.onnx.export.export_decode` (the same graph the browser
+ships) rather than a bespoke re-export, so it covers the real artifact.
 """
 
 import sys
@@ -18,46 +20,7 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 from _onnx_parity_worker import build_tiny_model  # noqa: E402
 
-from granite_switch.onnx.wrapper import reskin_for_export  # noqa: E402
-from granite_switch.onnx.decode import OnnxDecodeWrapper  # noqa: E402
-
-
-def _export_decode(model, example_inputs):
-    wrapper = OnnxDecodeWrapper(model).eval()
-    n = wrapper.num_layers
-    in_names = ["input_ids", "past_switch_key0", "past_switch_val0"]
-    for li in range(n):
-        in_names += [f"past_key.{li}", f"past_value.{li}"]
-    out_names = ["logits", "present_switch_key0", "present_switch_val0"]
-    for li in range(n):
-        out_names.append(f"present_key.{li}")
-    for li in range(n):
-        out_names.append(f"present_value.{li}")
-
-    # Past sequence-length axis is dynamic (the cache grows each step). The
-    # dynamo exporter wants the modern `dynamic_shapes` API (positional, matching
-    # forward's signature: input_ids, past_switch_key0, past_switch_val0, *past_kv).
-    past_len = torch.export.Dim("past_len")
-    # Signature is (input_ids, past_switch_key0, past_switch_val0, *past_kv), so
-    # dynamic_shapes has 4 entries; the last is a tuple covering the var-args.
-    past_kv_shapes = tuple({2: past_len} for _ in range(2 * n))
-    dynamic_shapes = (
-        {},                      # input_ids [b,1]
-        {1: past_len},           # past_switch_key0 [b, past_len]
-        {1: past_len},           # past_switch_val0 [b, past_len]
-        past_kv_shapes,          # *past_kv: each [b, kvh, past_len, hd]
-    )
-
-    td = tempfile.mkdtemp()
-    p = os.path.join(td, "decode.onnx")
-    with torch.no_grad():
-        torch.onnx.export(
-            wrapper, tuple(example_inputs), p,
-            input_names=in_names, output_names=out_names,
-            dynamic_shapes=tuple(dynamic_shapes),
-            opset_version=18, dynamo=True,
-        )
-    return p, in_names, out_names
+from granite_switch.onnx.export import export_decode  # noqa: E402
 
 
 def run_decode_parity(verbose=True):
@@ -74,27 +37,21 @@ def run_decode_parity(verbose=True):
     with torch.no_grad():
         ref = model(input_ids=full_ids, use_cache=False).logits.numpy()
 
-    # Reskin for export (same model object; eager attention forced).
-    reskin_for_export(model)
+    # Export the production single decode graph (reskins the model in place).
+    td = tempfile.mkdtemp()
+    onnx_path = os.path.join(td, "decode.onnx")
+    export_decode(model, onnx_path, n_layers=n_layers, kv_heads=kvh, head_dim=hd)
 
-    # Seed past state from the first token via the decode wrapper itself
-    # (start from empty past, feed tokens one at a time).
+    out_names = ["logits", "present_switch_key0", "present_switch_val0"]
+    out_names += [f"present_key.{li}" for li in range(n_layers)]
+    out_names += [f"present_value.{li}" for li in range(n_layers)]
+
+    # Seed past state from an empty past, feeding tokens one at a time.
     bsz = 1
     sk0 = torch.zeros(bsz, 0)
     sv0 = torch.zeros(bsz, 0)
     pk = [torch.zeros(bsz, kvh, 0, hd) for _ in range(n_layers)]
     pv = [torch.zeros(bsz, kvh, 0, hd) for _ in range(n_layers)]
-
-    # Export with a NON-degenerate example (past_len=1) so torch.export infers a
-    # genuine dynamic sequence axis; the actual loop still starts from past_len=0.
-    ex_sk0 = torch.zeros(bsz, 1)
-    ex_sv0 = torch.zeros(bsz, 1)
-    ex_pk = [torch.zeros(bsz, kvh, 1, hd) for _ in range(n_layers)]
-    ex_pv = [torch.zeros(bsz, kvh, 1, hd) for _ in range(n_layers)]
-    example = [torch.tensor([[seq[0]]]), ex_sk0, ex_sv0]
-    for li in range(n_layers):
-        example += [ex_pk[li], ex_pv[li]]
-    onnx_path, in_names, out_names = _export_decode(model, example)
 
     import onnxruntime as ort
     sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
@@ -135,7 +92,7 @@ def main():
     print("ONNX decode parity (KV-cached step-by-step vs HF full forward):")
     ok, max_diff, _ = run_decode_parity()
     if ok:
-        print(f"\nPASS: decode matches prefill/HF (max |diff| = {max_diff:.3e})")
+        print(f"\nPASS: decode matches HF full forward (max |diff| = {max_diff:.3e})")
         return 0
     print(f"\nFAIL: decode diverges (max |diff| = {max_diff:.3e})")
     return 1

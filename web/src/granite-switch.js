@@ -2,10 +2,11 @@
 // Granite Switch browser/Node runtime over ONNX Runtime Web.
 //
 // transformers.js has no custom-architecture API for `model_type:
-// granite_switch`, so we drive the exported ONNX graphs directly with raw
-// onnxruntime. Two graphs:
-//   - prefill.onnx : full prompt   -> logits + present_switch_* + present_* KV
-//   - decode.onnx  : one token+past -> logits + grown present_* state
+// granite_switch`, so we drive the exported ONNX graph directly with raw
+// onnxruntime. ONE graph:
+//   - decode.onnx : input_ids [1,N] + past_* -> logits + grown present_* state.
+//     Its input_ids seq axis is dynamic, so the SAME graph runs the batched first
+//     pass over the whole prompt (empty past) and each single-token decode step.
 //
 // The switch's cumulative adapter selection is preserved across decode steps by
 // threading present_switch_key0/val0 (compact per-position switch signal) back
@@ -18,8 +19,8 @@
 // `<name>.onnx.data` file alongside the `.onnx` graph. onnxruntime-node resolves
 // such a sidecar automatically from disk, but onnxruntime-web (WASM) does NOT —
 // it must be handed the bytes explicitly via the `externalData` session option.
-// `load()` therefore accepts pre-fetched buffers (`prefillData`/`decodeData`) or
-// a `fetchExternalData` flag that fetches the sidecar in the browser. The `path`
+// `load()` therefore accepts a pre-fetched buffer (`decodeData`) or a
+// `fetchExternalData` flag that fetches the sidecar in the browser. The `path`
 // in the externalData entry MUST equal the sidecar basename baked into the
 // graph's `location` (i.e. `<basename(onnxPath)>.data`), or ORT silently fails to
 // mount the weights and aborts in WASM.
@@ -42,9 +43,8 @@ function _toU8(data) {
 }
 
 export class GraniteSwitch {
-  constructor(ort, prefillSession, decodeSession, meta) {
+  constructor(ort, decodeSession, meta) {
     this.ort = ort;
-    this.prefill = prefillSession; // may be null — generate() never uses it
     this.decode = decodeSession;
     this.meta = meta;
   }
@@ -68,15 +68,12 @@ export class GraniteSwitch {
   // For onnxruntime-node, pass ["cpu"].
   //
   // External-data opts (all optional, backward compatible):
-  //   prefillData / decodeData : pre-fetched sidecar bytes (ArrayBuffer/Uint8Array)
-  //   fetchExternalData        : fetch each graph's .onnx.data in the browser
-  //   externalDataBaseUrl      : base URL/dir for that fetch (default: graph's dir)
-  //
-  // A falsy `prefillPath` is allowed (browser may load decode-only); a prefill
-  // load failure is tolerated since generate() replays the prompt through decode.
+  //   decodeData        : pre-fetched sidecar bytes (ArrayBuffer/Uint8Array)
+  //   fetchExternalData : fetch the graph's .onnx.data in the browser
+  //   externalDataBaseUrl : base URL/dir for that fetch (default: graph's dir)
   static async load(ort, {
-    prefillPath, decodePath, meta, executionProviders,
-    prefillData, decodeData, fetchExternalData, externalDataBaseUrl,
+    decodePath, meta, executionProviders,
+    decodeData, fetchExternalData, externalDataBaseUrl,
   }) {
     const eps = executionProviders || ["webgpu", "wasm"];
 
@@ -87,34 +84,11 @@ export class GraniteSwitch {
     if (decodeExt) decodeOpts.externalData = decodeExt;
     const decode = await ort.InferenceSession.create(decodePath, decodeOpts);
 
-    let prefill = null;
-    if (prefillPath) {
-      try {
-        const prefillExt = await this._externalDataOpt(prefillPath, {
-          explicit: prefillData, fetchExternalData, externalDataBaseUrl,
-        });
-        const prefillOpts = { executionProviders: eps };
-        if (prefillExt) prefillOpts.externalData = prefillExt;
-        prefill = await ort.InferenceSession.create(prefillPath, prefillOpts);
-      } catch (e) {
-        // generate() never uses the prefill graph; a missing/broken prefill
-        // artifact must not block decode-only inference.
-        prefill = null;
-      }
-    }
-    return new GraniteSwitch(ort, prefill, decode, meta);
+    return new GraniteSwitch(ort, decode, meta);
   }
 
   _t(type, data, dims) {
     return new this.ort.Tensor(type, data, dims);
-  }
-
-  // Run the prefill graph over the full prompt. Returns { logits, state }.
-  async _runPrefill(promptIds) {
-    const n = promptIds.length;
-    const input = this._t("int64", BigInt64Array.from(promptIds.map(BigInt)), [1, n]);
-    const out = await this.prefill.run({ input_ids: input });
-    return out;
   }
 
   // Greedy generation. Returns the full token sequence (prompt + generated).
@@ -122,10 +96,11 @@ export class GraniteSwitch {
     const meta = this.meta;
     const L = meta.n_layers;
 
-    // ── Prefill ───────────────────────────────────────────────────
-    // The prefill graph only outputs logits in this build; to seed the decode
-    // cache we instead warm the decode graph by replaying the prompt through it
-    // (simplest correct path; a fused prefill->state export is a later optimization).
+    // ── Prompt pass ───────────────────────────────────────────────
+    // The single decode graph seeds its own KV/switch state. This validator
+    // warms it by replaying the prompt token-by-token (one step() per token);
+    // the browser runtime instead feeds the whole prompt in one pass (input_ids
+    // [1,N] + empty past) — same graph, fewer session.run calls.
     let sk0 = new Float32Array(0), skDims = [1, 0];
     let sv0 = new Float32Array(0);
     let pastK = Array.from({ length: L }, () => new Float32Array(0));

@@ -134,17 +134,15 @@ def quantize_onnx(src_onnx, dst_onnx, *, scheme="int8", block_size=32):
 
 
 def quantize_model_dir(out_dir, *, scheme="int8", block_size=32):
-    """Quantize the prefill + decode graphs already exported into ``out_dir``.
+    """Quantize the single decode graph already exported into ``out_dir``.
 
-    Writes ``prefill_<scheme>.onnx`` and ``decode_<scheme>.onnx`` (plus their
-    sidecars) alongside the fp32 graphs, and mirrors the quantized decode graph
-    into the ``tfjs/`` layout as ``onnx/model_<scheme>.onnx`` so transformers.js
-    can pick it via ``dtype: "<scheme>"``.
+    Writes ``decode_<scheme>.onnx`` (plus its sidecar) alongside the fp32 graph,
+    and mirrors the quantized decode graph into the ``tfjs/`` layout as
+    ``onnx/model_<scheme>.onnx`` so transformers.js can pick it via
+    ``dtype: "<scheme>"``.
     """
-    import shutil
-
     results = {}
-    for name in ("prefill", "decode"):
+    for name in ("decode",):
         src = os.path.join(out_dir, f"{name}.onnx")
         if not os.path.exists(src):
             continue
@@ -152,18 +150,16 @@ def quantize_model_dir(out_dir, *, scheme="int8", block_size=32):
         quantize_onnx(src, dst, scheme=scheme, block_size=block_size)
         results[name] = dst
 
-    # Mirror the quantized graphs into the tfjs/ layout so transformers.js can pick
-    # them via `dtype: "<scheme>"`:
-    #   decode  -> tfjs/onnx/model_<scheme>.onnx   (the default decoder file)
-    #   prefill -> tfjs/onnx/prefill_<scheme>.onnx (loaded as the batched-prefill
-    #              session; without this the browser has no quantized prefill and
-    #              silently falls back to per-token prompt replay — slow first token).
+    # Mirror the quantized decode graph into the tfjs/ layout so transformers.js can
+    # pick it via `dtype: "<scheme>"`:
+    #   decode -> tfjs/onnx/model_<scheme>.onnx  (the default decoder file; this one
+    #             graph serves both the batched first pass and incremental decode).
     tfjs_onnx = os.path.join(out_dir, "tfjs", "onnx")
     if os.path.isdir(tfjs_onnx):
         import onnx
 
         # (src result key, tfjs file stem) for each graph to mirror.
-        for src_key, tfjs_stem in (("decode", "model"), ("prefill", "prefill")):
+        for src_key, tfjs_stem in (("decode", "model"),):
             src = results.get(src_key)
             if not src:
                 continue

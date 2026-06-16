@@ -1,32 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Decode-path (KV-cached) export wrapper for Granite Switch.
+"""KV-cached export wrapper for Granite Switch — ONE graph for both passes.
 
-The prefill graph (:mod:`granite_switch.onnx.wrapper`) processes the whole prompt
-at once. Incremental generation in the browser feeds one token at a time and
-must reuse cached K/V — and, crucially, must preserve the switch's *cumulative*
-adapter selection across steps.
+A single exported graph serves both the batched first pass over the whole prompt
+(``input_ids [b, N]`` with an empty past) and incremental single-token decode
+(``input_ids [b, 1]`` with a non-empty past). ``input_ids``'s seq axis is dynamic
+and :func:`_forward_core` is generalized over it, so there is no separate prefill
+graph (which would duplicate the same weights). Incremental generation must reuse
+cached K/V — and, crucially, must preserve the switch's *cumulative* adapter
+selection across steps.
 
-This wrapper exposes a flat single-token decode signature with explicit tensor
-state (no HF ``Cache`` objects), suitable for ``onnxruntime-web``:
+This wrapper exposes a flat decode signature with explicit tensor state (no HF
+``Cache`` objects), suitable for ``onnxruntime-web``:
 
 inputs
-    input_ids            [b, 1]                      the new token
+    input_ids            [b, q_len]                  new token(s); q_len=N first pass, 1 decode
     past_switch_key0     [b, past_len]               switch signal: ±gain per past pos
     past_switch_val0     [b, past_len]               switch signal: adapter id per past pos
     past_key.{L}         [b, kv_heads, past_len, hd] per-layer cached keys
     past_value.{L}       [b, kv_heads, past_len, hd] per-layer cached values
 
 outputs
-    logits               [b, 1, vocab]
-    present_switch_key0  [b, past_len+1]
-    present_switch_val0  [b, past_len+1]
-    present_key.{L}      [b, kv_heads, past_len+1, hd]
-    present_value.{L}    [b, kv_heads, past_len+1, hd]
+    logits               [b, q_len, vocab]
+    present_switch_key0  [b, past_len+q_len]
+    present_switch_val0  [b, past_len+q_len]
+    present_key.{L}      [b, kv_heads, past_len+q_len, hd]
+    present_value.{L}    [b, kv_heads, past_len+q_len, hd]
 
-Threading ``switch_key0`` / ``switch_val0`` is what keeps cumulative adapter
-selection correct: the new token's adapter index is computed by attending over
-the concatenated past+current switch signal, identical to what prefill computes
-for that absolute position.
+The browser runs the first pass by feeding zero-length ``past_*`` tensors (the
+no-cache case, ``past_len=0``); see ``web/src/granite-switch-register.js``'s
+``emptyCacheFeeds``. Threading ``switch_key0`` / ``switch_val0`` is what keeps
+cumulative adapter selection correct across steps: each token's adapter index is
+computed by attending over the concatenated past+current switch signal.
 """
 
 import torch
@@ -45,15 +49,16 @@ def _forward_core(
     past_keys,            # list[L] of [b, kvh, past_len, hd]
     past_values,          # list[L] of [b, kvh, past_len, hd]
 ):
-    """Shared forward for BOTH prefill (q_len=N, past_len=0) and decode (q_len=1).
+    """Shared forward for the first pass (q_len=N, past_len=0) AND decode (q_len=1).
 
     This is the single source of truth for the Granite Switch ONNX forward: the
     cumulative switch selection, embed, RoPE, per-layer attention over past+current
-    K/V, and MLP — all generalized over ``q_len``. The decode wrapper calls it with
-    a single new token and a non-empty past; the prefill wrapper calls it with the
-    whole prompt and an empty past. Keeping them on ONE code path guarantees prefill
-    and decode are bit-faithful to each other (the prefill->decode handoff depends on
-    it). Mirrors the Python HF model's batched-prefill-then-cached-decode forward.
+    K/V, and MLP — all generalized over ``q_len``. The browser calls the exported
+    graph with the whole prompt and an empty past for the first pass, then with a
+    single new token and a non-empty past for each decode step. ONE code path (and
+    ONE exported graph) guarantees the first pass and decode are bit-faithful to
+    each other (the handoff depends on it). Mirrors the Python HF model's
+    batched-prefill-then-cached-decode forward.
 
     Returns ``(logits [b,q_len,vocab], key0_full [b,total], val0_full [b,total],
     present_key.{i} [b,kvh,total,hd]…, present_value.{i}…)`` where total = past+q_len.
@@ -175,7 +180,12 @@ def _forward_core(
 
 
 class OnnxDecodeWrapper(nn.Module):
-    """Single-token KV-cached decode over a reskinned GraniteSwitch model."""
+    """KV-cached graph over a reskinned GraniteSwitch model.
+
+    Serves both the batched first pass (``q_len=N``, empty past) and incremental
+    decode (``q_len=1``, non-empty past); the export makes ``input_ids``'s seq axis
+    dynamic so one graph covers both (see :func:`granite_switch.onnx.export.export_decode`).
+    """
 
     def __init__(self, model: nn.Module):
         super().__init__()
@@ -191,38 +201,3 @@ class OnnxDecodeWrapper(nn.Module):
         return _forward_core(
             self, input_ids, past_switch_key0, past_switch_val0, past_keys, past_values
         )
-
-
-class OnnxPrefillStateWrapper(nn.Module):
-    """Batched prefill that emits the SAME state tuple shape as the decode graph.
-
-    Runs the whole prompt through :func:`_forward_core` with an EMPTY past
-    (``past_len=0``), so it produces ``logits [b,seq,vocab]`` plus the KV + switch
-    state (``present_*``) needed to seed incremental decode. This is the Python HF
-    model's batched prefill: ONE forward over the prompt instead of replaying it
-    token-by-token through the decode graph (the old browser behavior).
-
-    The output names/shapes MUST match the decode graph's ``present_*`` outputs so
-    transformers.js's cache (present -> past_key_values) feeds them straight into the
-    first decode step. See ``granite_switch.onnx.export.export_prefill``.
-    """
-
-    def __init__(self, model: nn.Module):
-        super().__init__()
-        self.m = model
-        gsm = model.model
-        self.gsm = gsm
-        self.num_layers = len(gsm.layers)
-
-    def forward(self, input_ids):
-        bsz, _ = input_ids.shape
-        device = input_ids.device
-        kvh = self.gsm.layers[0].self_attn.num_key_value_heads
-        hd = self.gsm.layers[0].self_attn.head_dim
-        # Empty past: zero-length switch signal and zero-length per-layer K/V.
-        zero_switch = torch.zeros(bsz, 0, dtype=torch.float32, device=device)
-        empty_k = [torch.zeros(bsz, kvh, 0, hd, dtype=torch.float32, device=device)
-                   for _ in range(self.num_layers)]
-        empty_v = [torch.zeros(bsz, kvh, 0, hd, dtype=torch.float32, device=device)
-                   for _ in range(self.num_layers)]
-        return _forward_core(self, input_ids, zero_switch, zero_switch, empty_k, empty_v)

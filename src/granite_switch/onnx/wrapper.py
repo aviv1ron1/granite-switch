@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Trace-friendly wrapper assembling the full Granite Switch forward for export.
+"""Reskin a Granite Switch model into its branchless, export-clean form.
 
-``torch.onnx.export`` traces a single ``nn.Module.forward``. This module wraps a
-:class:`~granite_switch.hf.modeling_granite_switch.GraniteSwitchForCausalLM`
-whose switched-LoRA / switch layers have been swapped for the branchless
-:mod:`granite_switch.onnx.export_modules` variants, and exposes a flat
-``forward(input_ids)`` signature returning a plain ``logits`` tensor (no
-``Cache`` objects, no kwargs) so the exporter sees a clean dataflow graph.
-
-Phase 1 targets the prefill, no-cache signature. The decode signature with the
-threaded ``past.switch.*`` cumulative state is added in Phase 3.
+``torch.onnx.export`` cannot trace the switched-LoRA / switch layers'
+data-dependent control flow. :func:`reskin_for_export` swaps those layers in place
+for the branchless :mod:`granite_switch.onnx.export_modules` variants (keeping the
+same parameters) and pins the eager attention backend, leaving the model ready for
+:class:`granite_switch.onnx.decode.OnnxDecodeWrapper` to export the single
+KV-cached graph (which serves both the batched first pass and incremental decode).
 """
 
-import torch
 import torch.nn as nn
 
 from .export_modules import reskin_lora_modules_for_export, OnnxSingleSwitch
@@ -48,20 +44,3 @@ def reskin_for_export(model: nn.Module) -> nn.Module:
 
     model.eval()
     return model
-
-
-class OnnxPrefillWrapper(nn.Module):
-    """Flat ``forward(input_ids) -> logits`` over a reskinned GraniteSwitch model.
-
-    No KV cache: this is the prefill graph used to validate that the full
-    switch + LoRA + base + lm_head forward exports to a clean ONNX graph
-    (GATE 1) and matches the HF backend numerically (GATE 2).
-    """
-
-    def __init__(self, model: nn.Module):
-        super().__init__()
-        self.model = model
-
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        out = self.model(input_ids=input_ids, use_cache=False, return_dict=True)
-        return out.logits

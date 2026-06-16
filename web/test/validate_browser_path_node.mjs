@@ -41,7 +41,6 @@ const ok = (cond, msg) => { console.log((cond ? "PASS" : "FAIL") + ": " + msg); 
 // ── 1. externalData wiring + token-id golden ───────────────────────────────
 const gs = await GraniteSwitch.load(ort, {
   decodePath,
-  prefillPath: null,            // generate() never uses prefill
   decodeData,                   // forces the externalData branch
   meta,
   executionProviders: ["cpu"],

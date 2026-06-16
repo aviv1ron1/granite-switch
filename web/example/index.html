@@ -40,7 +40,6 @@
       status("loading model…");
       const meta = await (await fetch("./model/gs_onnx.json")).json();
       gs = await GraniteSwitch.load(ort, {
-        prefillPath: "./model/prefill.onnx",
         decodePath: "./model/decode.onnx",
         meta,
         executionProviders: ["webgpu", "wasm"],

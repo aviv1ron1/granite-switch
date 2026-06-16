@@ -265,8 +265,10 @@ class OnnxSingleSwitch(SingleSwitch):
     Where/Softmax/MatMul ops. The cumulative-attention math and the
     token-exchange rewrite are otherwise identical to the parent.
 
-    Cache handling (the cumulative switch K/V threaded across decode steps) is
-    added in Phase 3; this Phase-1 variant targets the no-cache prefill export.
+    This ``forward`` is the no-cache (whole-sequence) selection; the cumulative
+    switch K/V threaded across decode steps is handled by
+    :meth:`compute_signals` / :meth:`select_from_signals` (used by
+    :func:`granite_switch.onnx.decode._forward_core` for both passes).
     """
 
     def forward(

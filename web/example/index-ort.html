@@ -70,7 +70,6 @@
       ort.env.wasm.numThreads = self.crossOriginIsolated ? 4 : 1;
       gs = await GraniteSwitch.load(ort, {
         decodePath: `${repoBase}/onnx/model.onnx`,
-        prefillPath: null,                 // generate() replays prompt through decode
         meta,
         executionProviders: ["wasm"],      // most portable; webgpu also works
         fetchExternalData: true,           // <-- fetch onnx/model.onnx.data and mount it

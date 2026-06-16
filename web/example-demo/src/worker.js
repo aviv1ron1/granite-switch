@@ -30,7 +30,7 @@ let tok = null;
 
 // Pick the ONNX Runtime execution provider the framework-native way: prefer
 // WebGPU (the model matmuls run on the GPU — Metal on a Mac, ~several× faster than
-// WASM for both prefill and decode), else WASM/CPU. transformers.js accepts
+// WASM for the prompt pass and decode), else WASM/CPU. transformers.js accepts
 // `device:"webgpu"` and would fall back internally, but probing navigator.gpu lets
 // us REPORT the choice in the UI and skip a doomed WebGPU attempt on browsers that
 // don't support it. The value flows from_pretrained -> constructSessions ->
@@ -87,7 +87,7 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost, revision })
 
   // ONE shared load: all three adapters live in this single model; the control
   // token (chosen per generation) selects which fires. `device` selects the EP for
-  // BOTH the decode and (when present) the prefill session inside loadGraniteSwitch.
+  // the single decode graph (which serves both the batched first pass and decode).
   // Forward progress events on.
   model = await loadGraniteSwitch(name, {
     dtype,
@@ -108,10 +108,7 @@ async function handleLoad({ mode, name, fileBase, dtype, remoteHost, revision })
     env: envForTokenizer,
   });
 
-  // Report whether a stateful prefill session loaded (vs the per-token replay
-  // fallback) so the UI / console can distinguish the fast path.
-  const prefill = !!(model?.sessions && model.sessions.prefill);
-  self.postMessage({ type: "ready", threaded, device, prefill });
+  self.postMessage({ type: "ready", threaded, device });
 }
 
 // One greedy generation, streaming decoded chunks back per token. `which` ("base" |

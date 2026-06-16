@@ -303,12 +303,6 @@ worker.onmessage = (e) => {
           "a one-time reload.)",
         );
       }
-      if (m.prefill === false) {
-        console.warn(
-          "No stateful prefill session — falling back to per-token prompt replay " +
-          "(slower first token). Re-export the model with a state-emitting prefill graph.",
-        );
-      }
       runBtn.disabled = false;
       break;
     }

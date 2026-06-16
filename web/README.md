@@ -38,18 +38,21 @@ The rest of this README covers the raw onnxruntime-web runtime. (transformers.js
 
 The full Granite Switch forward — adapter selection from control tokens, the
 control-token rewrite, branchless stacked-LoRA, the base decoder, and the LM
-head — is exported into two self-contained ONNX graphs:
+head — is exported into a **single** self-contained ONNX graph:
 
-- `prefill.onnx` — processes the whole prompt.
-- `decode.onnx` — one token at a time, with KV cache **plus** the switch's
-  cumulative adapter-selection state threaded across steps
-  (`past_switch_key0` / `past_switch_val0`). This is what keeps adapter
-  selection correct after the prompt.
+- `decode.onnx` — KV-cached, **plus** the switch's cumulative adapter-selection
+  state threaded across steps (`past_switch_key0` / `past_switch_val0`), which is
+  what keeps adapter selection correct after the prompt. Its `input_ids` seq axis
+  is dynamic, so the SAME graph serves both the batched first pass over the whole
+  prompt (`input_ids [1, N]` + an empty past) and each subsequent single-token
+  decode step (`input_ids [1, 1]` + a non-empty past). There is no separate
+  `prefill.onnx` — that would ship a duplicate copy of the same weights.
 
-`src/granite-switch.js` drives those graphs with a greedy decode loop. It is
+`src/granite-switch.js` drives this graph with a greedy decode loop. It is
 engine-agnostic: pass `onnxruntime-web` in the browser, or `onnxruntime-node`
-headlessly. (The loop replays the prompt through `decode.onnx` to build state, so
-the `prefill.onnx` graph is optional at inference time.)
+headlessly. (The browser runtime feeds the whole prompt in one pass with an empty
+past; the Node validator instead replays the prompt token-by-token through the
+same graph to build state — same graph, fewer `session.run` calls in the browser.)
 
 `src/granite-switch-tokenizer.js` wraps `@huggingface/transformers`'
 `AutoTokenizer` + the model's `chat_template.jinja` so you can go from text to
@@ -67,7 +70,6 @@ does this for you:
 ```js
 const gs = await GraniteSwitch.load(ort, {
   decodePath: `${repoBase}/onnx/model.onnx`,
-  prefillPath: null,                  // optional; generate() uses only decode
   meta,
   executionProviders: ["wasm"],
   fetchExternalData: true,            // fetch onnx/model.onnx.data and mount it
@@ -75,10 +77,10 @@ const gs = await GraniteSwitch.load(ort, {
 });
 ```
 
-The `path` in each `externalData` entry must equal the sidecar basename baked
+The `path` in the `externalData` entry must equal the sidecar basename baked
 into the graph (`model.onnx.data`); `load()` derives it from the `.onnx`
-filename. You can also pass pre-fetched bytes directly (`decodeData` /
-`prefillData`) — that is how the Node validator exercises this same path.
+filename. You can also pass pre-fetched bytes directly (`decodeData`) — that is
+how the Node validator exercises this same path.
 
 **Do not load a large *embedded* `.onnx` in the browser.** onnxruntime-web
 aborts when it has to parse a multi-hundred-MB inline protobuf in the WASM heap
@@ -93,19 +95,18 @@ pip install -e ".[onnx]"
 python -m granite_switch.onnx.export <composed-checkpoint> --output web/example/model
 ```
 
-This writes `prefill.onnx`, `decode.onnx`, `gs_onnx.json` (runtime metadata),
-and a `tfjs/` layout (the browser-loadable artifacts, also loadable **on**
-transformers.js).
+This writes `decode.onnx`, `gs_onnx.json` (runtime metadata), and a `tfjs/`
+layout (the browser-loadable artifacts, also loadable **on** transformers.js).
 
-**Weight layout.** The top-level `prefill.onnx` / `decode.onnx` embed their
-weights inline when small (a single `.onnx`, convenient for `onnxruntime` /
-`onnxruntime-node`), or keep an external `<name>.onnx.data` sidecar past ONNX's
-2 GiB protobuf cap — e.g. the real 4 B `granite-switch-4.1-3b-preview` (~16.6 GB
-fp32). `--embed` / `--no-embed` force that choice.
+**Weight layout.** The top-level `decode.onnx` embeds its weights inline when
+small (a single `.onnx`, convenient for `onnxruntime` / `onnxruntime-node`), or
+keeps an external `<name>.onnx.data` sidecar past ONNX's 2 GiB protobuf cap —
+e.g. the real 4 B `granite-switch-4.1-3b-preview` (~16.6 GB fp32). `--embed` /
+`--no-embed` force that choice.
 
-The **`tfjs/` artifacts are always external** (`model.onnx` + `model.onnx.data`,
-and a `prefill.onnx` pair) regardless of `--embed`, because that is the only form
-the browser can load (see [External data](#external-data-the-browser-weight-loading-requirement)).
+The **`tfjs/` artifacts are always external** (`model.onnx` + `model.onnx.data`)
+regardless of `--embed`, because that is the only form the browser can load (see
+[External data](#external-data-the-browser-weight-loading-requirement)).
 `gs_onnx.json` records which files to fetch (`browser_decode`,
 `browser_decode_external_data`, …).
 
@@ -126,7 +127,7 @@ real cases:
 
 - **4 B `granite-switch-4.1-3b-preview`:** `int8` reproduces the fp32 greedy
   decode token-for-token (~6 GB); `q4` diverges after a few tokens.
-- **350 M `granite-switch-4.0-350m-cti`:** `int8` is **broken** — the prefill
+- **350 M `granite-switch-4.0-350m-cti`:** `int8` is **broken** — the first-pass
   logit error vs HF is ~36.6 and argmax flips on the *first* generated token. A
   smaller model has less weight redundancy, so dynamic int8 destroys its
   numerics. Here **fp32 is the browser deliverable**, and at ~1.3 GB it fits the
