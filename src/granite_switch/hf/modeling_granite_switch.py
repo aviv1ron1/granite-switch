@@ -146,6 +146,13 @@ class GraniteSwitchPreTrainedModel(GraniteMoeHybridPreTrainedModel):
     base_model_prefix = "model"
     _no_split_modules = ["GraniteSwitchAttentionDecoderLayer"]
     _is_stateful = True
+    # Switch buffers vary by switch_impl: SingleSwitch registers
+    # `model.switch.control_to_substitute_lut`, ExternalSelectionSwitch has no
+    # buffers. Loading a checkpoint composed under one switch_impl with the model
+    # built under another (e.g. a `single`-composed checkpoint loaded as
+    # `external`) would otherwise emit unexpected-key warnings. The switch carries
+    # no learned weights, so ignoring its keys on load is safe.
+    _keys_to_ignore_on_load_unexpected = [r"model\.switch\..*"]
 
 
 class GraniteSwitchModel(GraniteSwitchPreTrainedModel):

@@ -105,8 +105,14 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
                 )
         self.adapter_token_ids = adapter_token_ids
 
-        # Validate adapter_substitute_token_ids — required when num_adapters > 0.
-        if num_adapters > 0:
+        # Validate adapter_substitute_token_ids — required for token-exchange
+        # (switch_impl == "single"), but NOT for switch_impl == "external", which
+        # drives adapter selection from caller-supplied indices and performs no
+        # LUT rewrite. switch_impl is not a named __init__ param; it round-trips
+        # via **kwargs and isn't assigned to self until super().__init__() runs
+        # below, so read it from kwargs here.
+        switch_impl = kwargs.get("switch_impl", "single")
+        if num_adapters > 0 and switch_impl != "external":
             if adapter_substitute_token_ids is None:
                 raise ValueError(
                     "adapter_substitute_token_ids is required when num_adapters > 0. "
