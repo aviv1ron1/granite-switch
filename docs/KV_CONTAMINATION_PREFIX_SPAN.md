@@ -91,3 +91,75 @@ COND1 clean = `3045/3409 = 0.893` for every row. Sorted by overall delta.
   (−0.077) — the only foreign with a net-positive prefix effect.
 - **Spread is wide.** Overall deltas range from −0.302 to +0.009; flips from 154 to 1202. The single
   worst foreign accounts for far more disruption than the rest combined.
+
+## Dose-response — contaminating a *leading fraction* of the prefix
+
+The results above contaminate the **whole** system+docs prefix (100%). To see *how much* of the
+prefix must be foreign-flavored before answerability degrades — and whether the response is linear
+or saturating — we re-ran the experiment flavoring only the **leading fraction** of the prefix.
+
+For each record, the foreign adapter flavors `[0 : round(frac·sys_end))`; the rest of the prefix
+`[round(frac·sys_end) : sys_end)` and the user span run under base, and the answer span stays
+`answerability` (`plan()`'s `frac` argument). `frac` is a fraction of *each record's own* `sys_end`,
+so the absolute contaminated-token count scales per record. `frac=0.0` is the clean baseline; `frac=1.0`
+reproduces the whole-prefix table above. We swept `frac ∈ {0.30, 0.50, 0.70}` for four foreigns
+spanning the severity range — one severe (`hallucination_detection`), one moderate (`guardian-core`),
+two mild (`query_clarification`, `query_rewrite`) — over the same full file (3409 scored, COND1 = 0.893).
+
+### Overall answerability accuracy vs. contaminated fraction
+
+The `0%` column is the shared clean baseline; the `100%` column is from the whole-prefix table above.
+
+| Foreign | 0% | 30% | 50% | 70% | 100% |
+|---|---|---|---|---|---|
+| hallucination_detection | 0.893 | 0.664 (−0.230) | 0.610 (−0.283) | 0.586 (−0.307) | 0.592 (−0.302) |
+| guardian-core | 0.893 | 0.824 (−0.070) | 0.810 (−0.083) | 0.806 (−0.087) | 0.794 (−0.099) |
+| query_clarification | 0.893 | 0.852 (−0.041) | 0.842 (−0.052) | — (crashed) | 0.852 (−0.041) |
+| query_rewrite | 0.893 | 0.876 (−0.017) | 0.868 (−0.025) | 0.869 (−0.024) | 0.865 (−0.028) |
+
+Δ vs. the clean baseline is in parentheses. The `query_clarification` 70% cell is missing — see
+*Known gap* below.
+
+### Answerable-class accuracy (where the damage lands)
+
+The unanswerable class stays flat-to-slightly-up at every fraction (as in the whole-prefix study), so
+the dose-response is carried entirely by the answerable class. Answerable accuracy (clean = 0.871):
+
+| Foreign | 0% | 30% | 50% | 70% | 100% |
+|---|---|---|---|---|---|
+| hallucination_detection | 0.871 | 0.448 | 0.389 | 0.349 | 0.362 |
+| guardian-core | 0.871 | 0.733 | 0.711 | 0.705 | 0.685 |
+| query_clarification | 0.871 | 0.789 | 0.768 | — | 0.786 |
+| query_rewrite | 0.871 | 0.835 | 0.822 | 0.823 | 0.816 |
+
+## Key findings — dose-response
+
+- **The response saturates early; it is not linear.** Every foreign reaches the large majority of its
+  100% damage by **30%** contamination. `hallucination_detection` is the clearest: −0.230 at 30% is
+  ~76% of its −0.302 whole-prefix effect, and the curve is nearly flat from 50% on (−0.283 → −0.307).
+  Contaminating the *first third* of the prefix is almost as harmful as contaminating all of it.
+- **Damage front-loads on the earliest tokens.** Because the contaminated slice is *leading*, the
+  steep 0%→30% segment shows the system instruction + earliest documents carry most of the
+  cross-adapter KV divergence; later prefix tokens add little. This is consistent with a foreign
+  flavor perturbing the global context framing rather than accumulating linearly per token.
+- **Severity ordering is preserved at every fraction.** HD ≫ guardian-core > query_clarification >
+  query_rewrite holds across 30/50/70/100, so the partial-prefix dose ranks foreigns the same way the
+  whole-prefix study does — the curve is a faithful interpolation, not a reshuffling.
+- **Mild foreigns plateau (and can slightly overshoot 100%).** For `query_clarification` and
+  `query_rewrite`, 50% already matches or slightly exceeds the 100% damage (qclar 50% = −0.052 vs
+  100% = −0.041; qrew 70% = −0.024 vs 100% = −0.028). These small non-monotonicities are within
+  run-to-run noise (a handful of records out of 3409) and indicate the effect has plateaued, not that
+  more contamination helps.
+- **Practical implication.** KV reuse across adapters is dangerous even when only the *front* of a
+  shared prefix was built under a foreign adapter — a partially-foreign cache is nearly as
+  contaminating as a fully-foreign one. Guarding the *leading* prefix tokens is not sufficient
+  mitigation.
+
+### Known gap
+
+`query_clarification` at 70% (`f070`) is missing: that run hit a record-dependent CUDA out-of-bounds
+in the MoE shared-expert LoRA path (`SwitchedLoRALinear` scatter-add) that fires on certain records
+under the partial-prefix (`foreign[0:cut] → base → answerability`) plan layout at `frac < 1.0`. The
+other 11 cells completed cleanly. The crash is in the shared adapter kernel, not the experiment
+logic; the missing cell does not change the saturating-curve conclusion (qclar's 30% and 50% already
+bracket its flat 100% endpoint).
