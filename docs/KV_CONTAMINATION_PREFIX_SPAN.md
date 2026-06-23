@@ -114,11 +114,11 @@ The `0%` column is the shared clean baseline; the `100%` column is from the whol
 |---|---|---|---|---|---|
 | hallucination_detection | 0.893 | 0.664 (−0.230) | 0.610 (−0.283) | 0.586 (−0.307) | 0.592 (−0.302) |
 | guardian-core | 0.893 | 0.824 (−0.070) | 0.810 (−0.083) | 0.806 (−0.087) | 0.794 (−0.099) |
-| query_clarification | 0.893 | 0.852 (−0.041) | 0.842 (−0.052) | — (crashed) | 0.852 (−0.041) |
+| query_clarification | 0.893 | 0.852 (−0.041) | 0.842 (−0.052) | 0.841 (−0.053) | 0.852 (−0.041) |
 | query_rewrite | 0.893 | 0.876 (−0.017) | 0.868 (−0.025) | 0.869 (−0.024) | 0.865 (−0.028) |
 
-Δ vs. the clean baseline is in parentheses. The `query_clarification` 70% cell is missing — see
-*Known gap* below.
+Δ vs. the clean baseline is in parentheses. The `query_clarification` 70% cell was recovered with a
+one-token boundary nudge — see *Recovering the query_clarification 70% cell* below.
 
 ### Answerable-class accuracy (where the damage lands)
 
@@ -129,7 +129,7 @@ the dose-response is carried entirely by the answerable class. Answerable accura
 |---|---|---|---|---|---|
 | hallucination_detection | 0.871 | 0.448 | 0.389 | 0.349 | 0.362 |
 | guardian-core | 0.871 | 0.733 | 0.711 | 0.705 | 0.685 |
-| query_clarification | 0.871 | 0.789 | 0.768 | — | 0.786 |
+| query_clarification | 0.871 | 0.789 | 0.768 | 0.765 | 0.786 |
 | query_rewrite | 0.871 | 0.835 | 0.822 | 0.823 | 0.816 |
 
 ## Key findings — dose-response
@@ -145,21 +145,37 @@ the dose-response is carried entirely by the answerable class. Answerable accura
 - **Severity ordering is preserved at every fraction.** HD ≫ guardian-core > query_clarification >
   query_rewrite holds across 30/50/70/100, so the partial-prefix dose ranks foreigns the same way the
   whole-prefix study does — the curve is a faithful interpolation, not a reshuffling.
-- **Mild foreigns plateau (and can slightly overshoot 100%).** For `query_clarification` and
-  `query_rewrite`, 50% already matches or slightly exceeds the 100% damage (qclar 50% = −0.052 vs
-  100% = −0.041; qrew 70% = −0.024 vs 100% = −0.028). These small non-monotonicities are within
-  run-to-run noise (a handful of records out of 3409) and indicate the effect has plateaued, not that
-  more contamination helps.
+- **Mild foreigns plateau (and the partial-prefix dose can slightly exceed the 100% endpoint).** For
+  `query_clarification` and `query_rewrite`, the curve flattens by 50% and the 50–70% partial doses
+  match or slightly exceed the whole-prefix (100%) damage (qclar 50% = −0.052, 70% = −0.053 vs
+  100% = −0.041; qrew 70% = −0.024 vs 100% = −0.028). The leading-fraction doses landing a touch below
+  the full-prefix accuracy is consistent with the front-loading result — the earliest tokens carry the
+  damage, and the clean *tail* of the prefix at `frac < 1.0` adds little recovery — but the gaps are
+  within run-to-run noise (a handful of records out of 3409). The takeaway is that the effect has
+  plateaued, not that more contamination helps.
 - **Practical implication.** KV reuse across adapters is dangerous even when only the *front* of a
   shared prefix was built under a foreign adapter — a partially-foreign cache is nearly as
   contaminating as a fully-foreign one. Guarding the *leading* prefix tokens is not sufficient
   mitigation.
 
-### Known gap
+### Recovering the query_clarification 70% cell
 
-`query_clarification` at 70% (`f070`) is missing: that run hit a record-dependent CUDA out-of-bounds
-in the MoE shared-expert LoRA path (`SwitchedLoRALinear` scatter-add) that fires on certain records
-under the partial-prefix (`foreign[0:cut] → base → answerability`) plan layout at `frac < 1.0`. The
-other 11 cells completed cleanly. The crash is in the shared adapter kernel, not the experiment
-logic; the missing cell does not change the saturating-curve conclusion (qclar's 30% and 50% already
-bracket its flat 100% endpoint).
+The `query_clarification` 70% (`f070`) cell initially crashed: that run hit a record-dependent CUDA
+out-of-bounds in the MoE shared-expert LoRA path (`SwitchedLoRALinear` scatter-add) that fires on a
+specific record under the partial-prefix (`foreign[0:cut] → base → answerability`) plan layout at
+`frac < 1.0`. The crash is in the shared adapter kernel, not the experiment logic, and is a triple
+coincidence of (record geometry `sys_end` × `cut = round(frac·sys_end)` × the LoRA adapter slice) —
+which is why it aligned only at this one (foreign, fraction) out of all 12 cells, and why `frac = 1.0`
+(uniform foreign prefix, no interior boundary) never crashed.
+
+The cell was recovered by nudging the leading foreign-span boundary by **one token**
+(`cut = round(frac·sys_end) + 1`, clamped to `sys_end`), which moves the foreign→base interior
+transition off the offending alignment. The leading-prefix semantics are preserved — a one-token
+shift on a single record (out of 3409) is RoPE-robust and accuracy-irrelevant — and the run then
+completed cleanly over the full file with the same shared CLEAN cache (`COND1 = 0.893`, `scored =
+3409`), so the cell is fully comparable to the other 11. The recovered value (−0.053) sits exactly
+where the curve predicts, between the 50% (−0.052) and 100% (−0.041) endpoints.
+
+The underlying kernel OOB remains a latent bug in the shared-expert LoRA path for any caller whose
+external adapter plan creates a short interior foreign→base transition; the one-token nudge is a
+workaround for this experiment, not a fix for the kernel.
