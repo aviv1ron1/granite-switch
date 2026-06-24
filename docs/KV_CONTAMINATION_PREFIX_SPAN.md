@@ -179,3 +179,98 @@ where the curve predicts, between the 50% (−0.052) and 100% (−0.041) endpoin
 The underlying kernel OOB remains a latent bug in the shared-expert LoRA path for any caller whose
 external adapter plan creates a short interior foreign→base transition; the one-token nudge is a
 workaround for this experiment, not a fix for the kernel.
+
+## Two-adapter split prefix — stacking two foreigns over one cache
+
+The studies above flavor the whole prefix (or a leading fraction) with **one** foreign. This variant
+splits the system+docs prefix into two **contiguous halves**, each built under a different foreign,
+to test how two stacked flavours combine over the single shared KV cache:
+
+```
+[ system + docs prefix ]                 [ user ]   [ answer ]
+[ first 50% ][ second 50% ]
+ hallucination_detection  guardian-core    base       answerability
+```
+
+Same full file (3409 scored, COND1 = 0.893), preview checkpoint, answer span held at `answerability`.
+The boundary is `round(0.5·sys_end)` per record (`plan()`'s split arg). Comparison is against each
+foreign's *whole-prefix* result from the table above.
+
+| Prefix flavor | overall | Δ vs clean | answerable | unanswerable | flips |
+|---|---|---|---|---|---|
+| clean (COND1) | 0.893 | — | 0.871 | 0.926 | — |
+| guardian-core (whole) | 0.794 | −0.099 | 0.685 | 0.958 | 439 |
+| **HD (first ½) + guardian-core (second ½)** | **0.593** | **−0.301** | **0.359** | 0.942 | 1203 |
+| hallucination_detection (whole) | 0.592 | −0.302 | 0.362 | 0.926 | 1202 |
+
+### Key finding — the leading flavor dominates, not the average
+
+The 50/50 split lands at **0.593 overall / 0.359 answerable** — statistically indistinguishable from
+*whole-prefix* `hallucination_detection` (0.592 / 0.362), and nowhere near the average of the two
+single-foreign effects (which would predict ≈0.69). Replacing the entire **second half** of the
+prefix with the much milder `guardian-core` flavor changed essentially nothing: HD on the first half
+alone reproduces HD's full damage.
+
+This sharpens the dose-response conclusion (damage front-loads on the earliest tokens): when two
+foreigns are stacked, the one occupying the **leading** span sets the outcome. The trailing flavor is
+nearly inert because the answer step attends back over a prefix whose framing was already fixed by the
+first tokens' KV. Practically: in a multi-adapter pipeline, the *first* adapter to write a shared
+prefix's KV is the one that matters — guarding or flushing only the later prefix is not mitigation.
+
+(The partial-prefix OOB crash from the *Known gap* above did **not** recur here: the split plan keeps
+both halves of the prefix on a non-base adapter — no `foreign → base → answerability` interior
+boundary — so the shared-expert LoRA scatter path stays in range.)
+
+## N-way equal split — quarters, pairs, triples, and an ordering test
+
+The 50/50 result above suggests the *leading* prefix flavor dominates. To test that across more
+configurations — and to isolate **position** from **presence** — we generalized the split to N equal
+contiguous chunks (`scratch/contamination_prefix_span_nway.py`, `plan()` tiles `[0:sys_end)` into
+`len(foreigns)` equal slices, answer span held at `answerability`). Nine jobs over the four
+severity-spanning foreigns {`hallucination_detection` (HD, severe), `guardian-core` (gn, moderate),
+`query_clarification` (qc, mild), `query_rewrite` (qr, mild)}, same full file (3409 scored, COND1 =
+0.893), preview checkpoint. Foreigns are listed **in prefix order** (leftmost = leading chunk).
+
+| Split | Prefix order (leading → trailing) | overall | Δ vs clean | answerable | unanswerable | flips |
+|---|---|---|---|---|---|---|
+| clean | (COND1 baseline) | 0.893 | — | 0.871 | 0.926 | — |
+| 1/2 + 1/2 | **HD** · qc | 0.606 | −0.287 | 0.383 | 0.941 | 1150 |
+| 1/2 + 1/2 | **HD** · qr | 0.620 | −0.273 | 0.378 | 0.984 | 1099 |
+| 1/2 + 1/2 | **gn** · qc | 0.776 | −0.117 | 0.645 | 0.973 | 534 |
+| 1/2 + 1/2 | **gn** · qr | 0.811 | −0.082 | 0.713 | 0.958 | 376 |
+| 1/2 + 1/2 | **qc** · qr | 0.861 | −0.033 | 0.805 | 0.944 | 247 |
+| 1/3 ×3 | **HD** · gn · qc | 0.626 | −0.267 | 0.383 | 0.990 | 1093 |
+| 1/3 ×3 | **HD** · qc · qr | 0.640 | −0.253 | 0.408 | 0.987 | 1036 |
+| 1/3 ×3 | **qr** · gn · HD | 0.844 | −0.050 | 0.781 | 0.938 | 271 |
+| 1/4 ×4 | **HD** · gn · qc · qr | 0.629 | −0.264 | 0.391 | 0.986 | 1067 |
+
+(Whole-prefix singles for reference: HD 0.592, gn 0.794, qc 0.852, qr 0.865.)
+
+### Key finding — position dominates presence; the result tracks the *leading* chunk
+
+Every config's overall accuracy is predicted by its **leading** chunk alone, not by which foreigns are
+present, how many there are, or what fraction each occupies:
+
+- **HD-leading always collapses to the HD band (~0.61–0.64)** regardless of partners or HD's share. HD
+  over the first ½ (0.606, 0.620), first ⅓ (0.626, 0.640), or even just the first **¼** (4-way 0.629)
+  all reproduce whole-prefix HD's 0.592 — shrinking HD from 100% to 25% of the prefix barely moves the
+  result.
+- **gn-leading tracks gn (~0.78–0.81)**, qc-leading tracks the mild tier (qc·qr = 0.861 ≈ clean). The
+  two-mild control (qc·qr, no severe flavor anywhere) confirms the damage is *not* a generic
+  "stacked-foreigns" artifact — it requires a severe flavor in the *leading* position.
+- **The ordering test is decisive.** `HD · qc · qr` (HD first) = **0.640** vs `qr · gn · hd` (HD last)
+  = **0.844** — a **0.204** swing from the *same severe adapter* moved from the front to the back of
+  the prefix. When HD trails two milder flavors it is nearly inert; the result tracks the leading `qr`
+  (0.865). Presence of HD anywhere is not sufficient — only HD *in front* matters.
+- **The damage is the same answerable-class collapse** seen throughout: every HD-leading config drives
+  answerable accuracy to ~0.38–0.41 (from 0.871) while unanswerable stays flat-to-up (0.94–0.99). The
+  N-way splits change *which* foreign leads, not the *mechanism*.
+
+This is the strongest form of the front-loading result: the first adapter to write a shared prefix's
+KV fixes the global framing the answer step attends back over, and later chunks — however many, however
+severe — cannot undo it. Mitigation must protect the *leading* prefix tokens; guarding or re-flavoring
+the tail is ineffective.
+
+(No job hit the partial-prefix OOB crash: every N-way plan keeps the entire prefix on non-base
+adapters, so there is no `foreign → base → answerability` interior boundary to trip the shared-expert
+LoRA scatter path.)
