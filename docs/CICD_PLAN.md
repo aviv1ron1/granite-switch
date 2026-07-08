@@ -17,13 +17,12 @@ uv run pre-commit install --hook-type commit-msg   # DCO hook for commit message
 
 | Hook | What it does | Auto-fix? |
 |------|-------------|-----------|
-| `ruff-format` | Formats Python files | Yes |
-| `ruff` | Lints Python files (imports, style) | Yes (fixable issues) |
-| `check-headers` | Ensures every `.py` file starts with `# SPDX-License-Identifier: Apache-2.0` | Yes |
+| `ruff` | Lints Python files (imports, style) — **advisory** (reports only, does not block or modify) | No — advisory for now (see [Ruff rollout](#ruff-rollout-format-first-then-enforce)) |
+| `check-headers` | Ensures every `.py` file starts with `# SPDX-License-Identifier: Apache-2.0` | Yes (regenerates, then blocks until staged) |
 | `check-dco` | Validates commit message has `Signed-off-by: Name <email>` | No — blocks commit |
 | `check-toml` / `check-yaml` | Validates config file syntax | No |
 | `end-of-file-fixer` / `trailing-whitespace` | Hygiene | Yes |
-| `uv-lock` | Ensures `uv.lock` is in sync with `pyproject.toml` | No — run `uv lock` to fix |
+| `uv-lock` | Regenerates `uv.lock` when out of sync with `pyproject.toml` | Yes (regenerates, then blocks until staged) |
 
 ### DCO sign-off
 
@@ -54,14 +53,14 @@ uv run pre-commit run check-headers --all-files
 
 ## On Every PR: GitHub Actions
 
-Four workflows run automatically when a PR is opened against `main` or a commit is pushed.
+Three workflows run automatically when a PR is opened against `main` or a commit is pushed.
 
 ### `ci.yaml` — Lint + CPU tests + coverage
 
 **Trigger:** Pull request or push to `main`
 
 **Jobs:**
-1. `lint` — runs `ruff format --check` and `ruff check`
+1. `lint` — runs `ruff format --check .` and `ruff check .` over the **whole repository** (ruff respects `.gitignore`, so `scratch/` is skipped, but `tutorials/` — which lives outside `src/` — is included). These steps are **advisory** (`continue-on-error: true`): they surface findings in the logs but do not fail the build. See [Ruff rollout](#ruff-rollout-format-first-then-enforce).
 2. `test-cpu` — runs `tests/unit/`, `tests/composer/`, and `tests/hf/` on Python 3.11 and 3.12 in parallel
 
 Coverage is uploaded to [Codecov](https://codecov.io) after each test run (see [Coverage](#coverage) below).
@@ -118,7 +117,7 @@ granite-switch publishes to [public PyPI](https://pypi.org/project/granite-switc
 Semantic versioning: `MAJOR.MINOR.PATCH`. The version lives in `pyproject.toml` as the single source of truth:
 
 ```toml
-version = "0.2.0"
+version = "X.Y.Z"
 ```
 
 While in pre-1.0, increment `MINOR` for new features and `PATCH` for bug fixes. Bump to `1.0.0` when the public API stabilizes.
@@ -156,6 +155,39 @@ Builds wheel + sdist with `uv build`, then uploads with `uv publish`. Uses **PyP
 ---
 
 ## Roadmap
+
+### Ruff rollout: format first, then enforce
+
+The existing tree is not yet ruff-clean — a whole-repo `ruff check .` / `ruff format --check .` reports hundreds of findings across `src/`, `tests/`, `tutorials/`, and `docs/`. Enforcing ruff in the same PR that introduces the hooks would bury a small config change under a massive mechanical reformat.
+
+**Decision:** roll ruff out in **two separate PRs**, formatting first.
+
+Until PR 1 lands, ruff is intentionally **advisory** in both CI (`ci.yaml` lint steps use `continue-on-error: true`) and pre-commit (the `ruff` hook runs with `--exit-zero`; the auto-formatting hook is omitted). This is a temporary bridge, not the target state.
+
+#### PR 1 — repo-wide format (branches off `main`, touches source only)
+
+1. Add the final `[tool.ruff]` config to `pyproject.toml` **in this PR** — formatting output depends on the config + ruff version, so they must be fixed here and match what the hooks pin (ruff `v0.9.0`). Include an `__init__.py` guard so autofix does not strip re-exported imports:
+   ```toml
+   [tool.ruff.lint.per-file-ignores]
+   "**/__init__.py" = ["F401"]
+   ```
+2. Run `ruff format .` then `ruff check --fix .` (safe fixes only — **no** `--unsafe-fixes`) with the pinned ruff version. **Review the `--fix` diff**, especially import removals (F401) and import reordering (I), before committing.
+3. Land it as a **single commit** and record that commit's SHA in `.git-blame-ignore-revs` so it doesn't obscure `git blame`.
+4. Verify `ruff format --check .` and `ruff check .` are both clean.
+
+#### PR 2 — hooks + CI/CD (this PR, rebased on top of PR 1; touches no source)
+
+Once PR 1 is merged, rebase this branch and flip ruff to blocking:
+
+- **`ci.yaml`**: remove `continue-on-error: true` from the two ruff steps.
+- **`.pre-commit-config.yaml`**: re-add the `ruff-format` hook and change the `ruff` hook args to `[--exit-non-zero-on-fix, --fix, --config=pyproject.toml]`.
+
+Because the tree is already clean, this PR contains only config and CI wiring, and passes the (now blocking) gate on the first run.
+
+#### Caveats
+
+- **Coordinate timing.** A repo-wide reformat conflicts with every open branch; contributors with in-flight PRs must rebase through the format commit. Land PR 1 when few PRs are in flight, or warn contributors first.
+- **`nbstripout` is orthogonal to CI.** It's a pre-commit-only hook, so it does not gate CI and does not need notebooks pre-stripped for PR 2 to pass. The first notebook commit after it lands will strip that notebook's outputs — expected, not a regression.
 
 ### Phase 2: Mypy Type Checking
 
