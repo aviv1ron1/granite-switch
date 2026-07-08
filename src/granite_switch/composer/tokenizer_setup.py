@@ -8,10 +8,9 @@ token management and chat template modification.
 import json
 import os
 import re
-from typing import Dict, List, Optional, Tuple
 
 
-def _load_alora_invocation_token_ids(adapter_path: str) -> List[int]:
+def _load_alora_invocation_token_ids(adapter_path: str) -> list[int]:
     """Load alora_invocation_tokens from adapter_config.json.
 
     Raises:
@@ -52,8 +51,8 @@ def get_alora_first_invocation_token_id(adapter_path: str) -> int:
 
 def add_control_tokens(
     tokenizer,
-    discovered_adapters: List[Tuple[Optional[str], str, str, Optional[str]]],
-) -> Tuple[List[int], List[str]]:
+    discovered_adapters: list[tuple[str | None, str, str, str | None]],
+) -> tuple[list[int], list[str]]:
     """Add control tokens to the tokenizer for each adapter.
 
     Each adapter gets one control token: ``<|adapter_name|>`` which activates that adapter.
@@ -97,7 +96,7 @@ def add_control_tokens(
 
 def configure_chat_template(
     tokenizer,
-    discovered_adapters: List[Tuple[Optional[str], str, str, Optional[str]]],
+    discovered_adapters: list[tuple[str | None, str, str, str | None]],
 ):
     """Inject adapter control token mappings into a Granite chat template.
 
@@ -145,12 +144,12 @@ def configure_chat_template(
 
     # Build adapter mapping. For ALoRA adapters, decode alora_invocation_tokens
     # so the template can locate the right insertion point at render time.
-    adapter_mapping: Dict[str, Dict[str, str]] = {}
+    adapter_mapping: dict[str, dict[str, str]] = {}
     for adapter_info in discovered_adapters:
         adapter_path = adapter_info[0]
         adapter_name = adapter_info[1]
         technology = adapter_info[2]
-        entry: Dict[str, str] = {
+        entry: dict[str, str] = {
             "token": f"<|{adapter_name}|>",
             "type": technology,
         }
@@ -173,9 +172,7 @@ def configure_chat_template(
                 f"    '{adapter_name}': {{'token': '{info['token']}', 'type': '{info['type']}'}}"
             )
     adapter_map_def = (
-        "{%- set adapter_map = {\n"
-        + ",\n".join(mapping_entries)
-        + "\n} %}\n"
+        "{%- set adapter_map = {\n" + ",\n".join(mapping_entries) + "\n} %}\n"
     )
 
     adapter_lookup = """{#- Look up adapter token, type, and invocation text from adapter_name -#}
@@ -396,6 +393,7 @@ def configure_chat_template(
         skip_once_block + "\n        {{- ",
         modified_chat_template,
     )
+
     # Case B: '<|start_of_role|>ROLE<|end_of_role|>' merged literal (with or
     # without trailing concatenation). Split the literal so only the
     # '<|start_of_role|>' prefix goes through the skip block and the rest
@@ -403,15 +401,8 @@ def configure_chat_template(
     # Pattern: {{- 'literal_starting_with_start_of_role' (+ expr | ) }}
     def _split_merged(match: "re.Match") -> str:
         remainder = match.group(1)  # text after <|start_of_role|> up to end of literal
-        tail = match.group(2)        # trailing + expr or empty
-        return (
-            skip_once_block
-            + "\n        {{- '"
-            + remainder
-            + "'"
-            + tail
-            + " }}"
-        )
+        tail = match.group(2)  # trailing + expr or empty
+        return skip_once_block + "\n        {{- '" + remainder + "'" + tail + " }}"
 
     # Merged literal like '<|start_of_role|>system<|end_of_role|>' followed by
     # optional " + expr + ...". The first group captures everything inside the
@@ -424,9 +415,7 @@ def configure_chat_template(
     )
 
     tokenizer.chat_template = modified_chat_template
-    print(
-        f"Chat template configured with {len(adapter_mapping)} adapter mappings:"
-    )
+    print(f"Chat template configured with {len(adapter_mapping)} adapter mappings:")
     for adapter_name, info in adapter_mapping.items():
         if "invocation_text" in info:
             placement = f"before '{info['invocation_text']}' in last user message"
@@ -435,5 +424,7 @@ def configure_chat_template(
         print(f"  - {adapter_name}: {info['token']} ({info['type']}) → {placement}")
     print("Adapter token insertion logic added:")
     print("  - LoRA tokens: inserted at BEGINNING of sequence")
-    print("  - ALoRA tokens (user-message invocation): before invocation text in last user message")
+    print(
+        "  - ALoRA tokens (user-message invocation): before invocation text in last user message"
+    )
     print("  - ALoRA tokens (role-token invocation): before generation prompt")
