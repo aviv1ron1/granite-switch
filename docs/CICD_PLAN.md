@@ -8,10 +8,21 @@ Pre-commit hooks enforce code quality before a commit lands. They run automatica
 
 ### Setup
 
+pre-commit is a hook manager — it builds its own isolated environment per hook, so it does **not**
+need the project's virtualenv. Install it once as a standalone tool, then wire up the git hooks:
+
 ```bash
-uv run pre-commit install                      # hooks for staged files
-uv run pre-commit install --hook-type commit-msg   # DCO hook for commit messages
+uv tool install pre-commit                          # one-time, isolated — any platform
+pre-commit install                                  # hooks for staged files
+pre-commit install --hook-type commit-msg           # verifies the DCO sign-off
+pre-commit install --hook-type prepare-commit-msg   # auto-adds your DCO sign-off
 ```
+
+> Do **not** run `uv run pre-commit install`. `uv run` first syncs the project's default
+> dependency group (which includes vLLM + CUDA wheels); that has no macOS build and fails there,
+> and needlessly pulls the whole GPU stack on Linux. Installing pre-commit as a tool (`uv tool
+> install`, or `pipx`/system package) sidesteps this on every platform. All three `install`
+> commands are required — each git hook stage must be wired up separately.
 
 ### What runs on every commit
 
@@ -42,12 +53,12 @@ git rebase --signoff origin/main
 ### Running hooks manually
 
 ```bash
-# Run all hooks on all files
-uv run pre-commit run --all-files
+# Run all hooks on all files (mirrors CI's whole-repo scan)
+pre-commit run --all-files
 
 # Run a specific hook
-uv run pre-commit run ruff --all-files
-uv run pre-commit run check-headers --all-files
+pre-commit run ruff --all-files
+pre-commit run check-headers --all-files
 ```
 
 ---
