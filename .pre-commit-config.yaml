@@ -1,4 +1,8 @@
 fail_fast: true
+# Restrict hooks to the pre-commit stage by default so they don't also fire at
+# prepare-commit-msg / commit-msg (which are installed for the DCO hooks below).
+# The two DCO hooks override this with their own explicit `stages:`.
+default_stages: [pre-commit]
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.0
