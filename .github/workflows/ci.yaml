@@ -56,13 +56,14 @@ jobs:
 
       - name: Run CPU tests
         run: |
-          # Exclude tests that download/compose real models (requires_model),
-          # need CUDA (gpu), hit the network / take long (slow), or are the
-          # expensive code-theory suite (deep). Those run on the GPU cluster,
-          # not on GitHub-hosted runners, which lack the RAM/disk/time.
-          # tests/composer/ is also excluded here: even filtered, its suite is
-          # heavy enough that GitHub-hosted runners get killed mid-run. It runs
-          # on the GPU cluster instead.
+          # CI runs only tests/unit/ — the fast, self-contained CPU set.
+          # The marker filter still applies: tests that download/compose real
+          # models (requires_model), need CUDA (gpu), hit the network / take
+          # long (slow), or are the expensive code-theory suite (deep) are
+          # excluded.
+          # tests/composer/ and tests/hf/ are NOT run here: even filtered they
+          # are heavy enough to exhaust the GitHub Actions CPU-minutes quota and
+          # get killed mid-run. All of that coverage runs on the GPU cluster.
           uv run pytest tests/unit/ \
             -m "not requires_model and not gpu and not slow and not deep" \
             -v -s --tb=short -x \
