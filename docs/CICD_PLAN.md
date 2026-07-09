@@ -53,7 +53,7 @@ git rebase --signoff origin/main
 ### Running hooks manually
 
 ```bash
-# Run all hooks on all files (mirrors CI's whole-repo scan)
+# Run all hooks on all files — this is exactly what the CI `pre-commit` job runs
 pre-commit run --all-files
 
 # Run a specific hook
@@ -65,23 +65,20 @@ pre-commit run check-headers --all-files
 
 ## On Every PR: GitHub Actions
 
-Three workflows run automatically when a PR is opened against `main` or a commit is pushed.
+Two workflows run automatically when a PR is opened against `main` or a commit is pushed.
 
-### `ci.yaml` — Lint + CPU tests + coverage
+### `ci.yaml` — Pre-commit + CPU tests + coverage
 
 **Trigger:** Pull request or push to `main`
 
 **Jobs:**
-1. `lint` — runs `ruff format --check .` and `ruff check .` over the **whole repository** (ruff respects `.gitignore`, so `scratch/` is skipped, but `tutorials/` — which lives outside `src/` — is included). These are **blocking**: the tree is ruff-clean (see [Ruff rollout](#ruff-rollout-format-first-then-enforce)), so any new violation fails the build.
-2. `test-cpu` — runs `tests/unit/`, `tests/composer/`, and `tests/hf/` on Python 3.11 and 3.12 in parallel, filtered with `-m "not requires_model and not gpu and not slow and not deep"`. This is the **CI-safe set**: tests that download/compose real models (`requires_model`), need CUDA (`gpu`), hit the network or run long (`slow`), or are the expensive code-theory suite (`deep`) are **excluded** — GitHub-hosted runners lack the RAM, disk, and time budget to build a real checkpoint, and were being cancelled mid-compose. Those heavy tests run on the GPU cluster instead (see [Manual: GPU Tests](#manual-gpu-tests))
+1. `pre-commit` — runs `uvx pre-commit run --all-files`, executing the **exact same hooks** as the local pre-commit stage, pinned to the same versions in `.pre-commit-config.yaml`. This is the single source of truth: CI and local pre-commit can never drift, and any hook added or bumped in the config applies in CI automatically with no workflow edits. It covers ruff-format + ruff, `check-toml` / `check-yaml`, `validate-links` (broken local links / stale labels / broken first-party imports), `check-headers` (SPDX), the hygiene hooks (`end-of-file-fixer`, `trailing-whitespace`, `mixed-line-ending`, `check-merge-conflict`, `check-added-large-files`, `check-case-conflict`), `nbstripout`, and `uv-lock`. All are **blocking**: the tree is clean (see [Ruff rollout](#ruff-rollout-format-first-then-enforce)), so any new violation fails the build. Auto-fixing hooks (ruff, `end-of-file-fixer`, `check-headers`, `uv-lock`) modify files when something is wrong; pre-commit then reports failure and prints the diff (`--show-diff-on-failure`), telling the contributor to run pre-commit locally and re-commit. The DCO hooks (`add-signoff`, `check-dco`) run at the `prepare-commit-msg` / `commit-msg` stages, which `pre-commit run --all-files` does **not** execute — they are covered by `dco.yaml` instead. Hook environments are cached (`~/.cache/pre-commit`, keyed on the config file) so they don't reinstall every run.
+2. `test-cpu` (needs `pre-commit`) — runs `tests/unit/` and `tests/hf/` on Python 3.11 and 3.12 in parallel, filtered with `-m "not requires_model and not gpu and not slow and not deep"`. This is the **CI-safe set**: tests that download/compose real models (`requires_model`), need CUDA (`gpu`), hit the network or run long (`slow`), or are the expensive code-theory suite (`deep`) are **excluded** — GitHub-hosted runners lack the RAM, disk, and time budget to build a real checkpoint, and were being cancelled mid-compose. `tests/composer/` is excluded entirely for the same reason: even filtered, the suite is heavy enough that GitHub-hosted runners get killed mid-run. All of this heavy coverage runs on the GPU cluster instead (see [Manual: GPU Tests](#manual-gpu-tests))
 
 Coverage is uploaded to [Codecov](https://codecov.io) after each test run (see [Coverage](#coverage) below).
 
-### `check-headers.yaml` — SPDX header check
-
-**Trigger:** Pull request to `main`
-
-Runs `ci/check_headers.py` against all `.py` files in `src/` and `tests/`. Fails if any file is missing the SPDX header. The pre-commit hook auto-fixes this locally; the workflow is a safety net for PRs from contributors who haven't installed hooks.
+> **SPDX headers** are checked by the `check-headers` hook inside the `pre-commit` job above —
+> there is no separate headers workflow, so CI enforces them identically to local.
 
 ### `dco.yaml` — DCO sign-off check
 
