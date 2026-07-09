@@ -18,6 +18,12 @@ repos:
         files: '^(src|tests)/.*\.py$'
         pass_filenames: true
 
+      - id: add-signoff
+        name: Add DCO sign-off
+        entry: python ci/add_signoff.py
+        language: system
+        stages: [prepare-commit-msg]
+
       - id: check-dco
         name: Check DCO sign-off
         entry: python ci/check_dco.py

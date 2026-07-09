@@ -47,7 +47,12 @@ jobs:
 
       - name: Run CPU tests
         run: |
+          # Exclude tests that download/compose real models (requires_model),
+          # need CUDA (gpu), hit the network / take long (slow), or are the
+          # expensive code-theory suite (deep). Those run on the GPU cluster,
+          # not on GitHub-hosted runners, which lack the RAM/disk/time.
           uv run pytest tests/unit/ tests/composer/ tests/hf/ \
+            -m "not requires_model and not gpu and not slow and not deep" \
             -v -s --tb=short -x \
             --cov=granite_switch --cov-report=xml
 
