@@ -62,7 +62,7 @@ Three workflows run automatically when a PR is opened against `main` or a commit
 
 **Jobs:**
 1. `lint` — runs `ruff format --check .` and `ruff check .` over the **whole repository** (ruff respects `.gitignore`, so `scratch/` is skipped, but `tutorials/` — which lives outside `src/` — is included). These are **blocking**: the tree is ruff-clean (see [Ruff rollout](#ruff-rollout-format-first-then-enforce)), so any new violation fails the build.
-2. `test-cpu` — runs `tests/unit/`, `tests/composer/`, and `tests/hf/` on Python 3.11 and 3.12 in parallel
+2. `test-cpu` — runs `tests/unit/`, `tests/composer/`, and `tests/hf/` on Python 3.11 and 3.12 in parallel, filtered with `-m "not requires_model and not gpu and not slow and not deep"`. This is the **CI-safe set**: tests that download/compose real models (`requires_model`), need CUDA (`gpu`), hit the network or run long (`slow`), or are the expensive code-theory suite (`deep`) are **excluded** — GitHub-hosted runners lack the RAM, disk, and time budget to build a real checkpoint, and were being cancelled mid-compose. Those heavy tests run on the GPU cluster instead (see [Manual: GPU Tests](#manual-gpu-tests))
 
 Coverage is uploaded to [Codecov](https://codecov.io) after each test run (see [Coverage](#coverage) below).
 
@@ -208,6 +208,26 @@ very unlikely to stem from PR 1 because:
 (e.g. an integration-only run from `tests_on_uv_vllm19.yaml`). If so, treat it as
 a flaky near-tie test to be addressed separately (tolerance/top-k handling), and
 consider PR 1 cleared.
+
+### CPU CI marker split
+
+**What:** The first `test-cpu` runs on GitHub Actions were cancelled — not on a
+test assertion, but with `Error: The operation was canceled.` at
+`STEP 5: Saving model and tokenizer → Writing model shards`. A composer test was
+downloading a base model + adapters and writing a multi-shard checkpoint on a
+GitHub-hosted runner, exhausting its time/memory/disk budget.
+
+**Root cause:** the heavy-test markers (`requires_model` / `slow` / `gpu`) were
+incompletely applied. `tests/composer/test_save_load_compose.py` composes a real
+checkpoint and its docstring claimed "Marked slow + requires_model," but it
+carried no marker — so the default `-m "not deep"` filter ran it in CI.
+
+**Fix:** completed the module's markers and switched the `test-cpu` job to the
+denylist `-m "not requires_model and not gpu and not slow and not deep"`. The
+`not slow` clause is load-bearing, not redundant: `TestRealHubMetadata` in
+`test_selective_download.py` hits the real Hub for repo metadata and is marked
+`slow` only (it needs no checkpoint, so `requires_model` would be inaccurate).
+Heavy coverage continues to run on the GPU cluster.
 
 ---
 
