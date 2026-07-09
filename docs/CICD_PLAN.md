@@ -154,6 +154,62 @@ Builds wheel + sdist with `uv build`, then uploads with `uv publish`. Uses **PyP
 
 ---
 
+## Execution
+
+A running record of rollout milestones actually executed against the plan.
+
+### Post ruff formatting
+
+**What:** After applying the repo-wide ruff format + lint autofixes (the PR 1
+"format first" step of the [Ruff rollout](#ruff-rollout-format-first-then-enforce)),
+the full test suite was run to confirm the mechanical changes introduced no
+regressions.
+
+**How:** Submitted to the Vela GPU cluster (namespace `security`, 4 GPUs,
+`vllm19` dependency group) via a job config derived from `tests_on_uv_vllm19.yaml`,
+pointed at the formatted branch. It runs a ruff sanity check followed by all five
+suites with `pytest -n 4`.
+
+- Branch under test: `chore/ruff-format` (format commit)
+- Ruff sanity: `ruff check .` → **All checks passed!**; `ruff format --check .` → clean
+
+**Results:** 1,338 passed, 2 failed.
+
+| Suite | Result |
+|-------|--------|
+| `unit` | PASS — 86 passed |
+| `hf` | PASS — 563 passed, 16 skipped |
+| `composer` | PASS — 239 passed, 1 skipped |
+| `vllm` | PASS — 425 passed, 2 skipped |
+| `integration` | FAIL — 2 failed, 25 passed |
+
+**The 2 failures — assessed as pre-existing, not caused by the reformat.**
+Both are the same test, `test_hf_vllm_argmax_equivalence`
+(`tests/integration/test_switch_e2e_compose.py`), for `granite-4.0-micro` and
+`granite-4.1-3b`. Each fails on a **single token position** where the HF and
+vLLM backends pick different top-1 tokens:
+
+- `granite-4.0-micro`: position 6 — HF `2163` vs vLLM `1314`
+- `granite-4.1-3b`: position 3 — HF `2010` vs vLLM `3575`
+
+This is the classic near-tie / floating-point signature: at one position two
+tokens have near-equal logits and tiny numerical differences between the
+backends (fused vs. unfused kernels, reduction order) flip the argmax. It is
+very unlikely to stem from PR 1 because:
+
+1. The reformat only changed whitespace/layout, import ordering, and removed two
+   provably-unused locals — none of which touch any computation.
+2. Every other cross-backend equivalence test passed, including all 425 `vllm`
+   tests (`test_generation_equivalence`, `test_upstream_equivalence`) and the
+   integration `test_forward_logit_equivalence`.
+
+**Follow-up:** Confirm the same test also flips a position on unmodified `main`
+(e.g. an integration-only run from `tests_on_uv_vllm19.yaml`). If so, treat it as
+a flaky near-tie test to be addressed separately (tolerance/top-k handling), and
+consider PR 1 cleared.
+
+---
+
 ## Roadmap
 
 ### Ruff rollout: format first, then enforce
