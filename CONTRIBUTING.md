@@ -23,12 +23,84 @@ Or via pip: `pip install uv`
    ```
 3. Enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, SPDX/DCO checks, and basic hygiene checks):
    ```bash
-   uv run pre-commit install
+   uv run pre-commit install                                  # hooks for staged files
+   uv run pre-commit install --hook-type prepare-commit-msg   # auto-adds your DCO sign-off
+   uv run pre-commit install --hook-type commit-msg           # verifies the DCO sign-off
    git config blame.ignoreRevsFile .git-blame-ignore-revs
    ```
+   > **All three `install` commands are required.** `pre-commit install` alone only wires up the
+   > staged-file hooks; the DCO hooks run at the `prepare-commit-msg` and `commit-msg` stages and
+   > must be installed explicitly. With them in place your sign-off is added automatically — see
+   > [Sign off your commits (DCO)](#sign-off-your-commits-dco) below.
 4. Create a feature branch and make your changes
 5. Run tests: `uv run pytest tests/ -v`
 6. Submit a pull request
+
+## Sign off your commits (DCO)
+
+Every commit must carry a Developer Certificate of Origin (DCO) sign-off. By adding a sign-off you
+certify that you wrote the change (or otherwise have the right to submit it) under the project's
+license — see the [full DCO text](https://developercertificate.org/). A commit-msg hook and a CI
+check both reject commits that are missing it.
+
+A sign-off is just a trailer line at the end of the commit message:
+
+```
+Signed-off-by: Jane Doe <jane.doe@example.com>
+```
+
+### 1. Configure your name and email
+
+The sign-off is generated from your Git identity, so set it once (drop `--global` to scope it to
+this repository only):
+
+```bash
+git config --global user.name "Jane Doe"
+git config --global user.email "jane.doe@example.com"
+```
+
+The name and email **must match** the values you sign off with — a real name and a reachable email
+are expected, and the email must be a valid `name@host` address (the check requires an `@`). Verify
+with:
+
+```bash
+git config user.name
+git config user.email
+```
+
+### 2. Let the hook sign off for you (recommended)
+
+Once the `prepare-commit-msg` hook is installed (step 3 of [Getting Started](#getting-started)), your
+sign-off is appended **automatically** from the Git identity above — every `git commit` just works,
+no flags to remember:
+
+```bash
+git commit -m "Your commit message"   # Signed-off-by: is added for you
+```
+
+The `commit-msg` hook then verifies the trailer is present, and the CI DCO check enforces it on the
+PR as a backstop.
+
+### Signing off manually
+
+If you haven't installed the hook (e.g. a fresh clone), pass `-s` (`--signoff`) and Git appends the
+trailer itself:
+
+```bash
+git commit -s -m "Your commit message"
+```
+
+Forgot it on your last commit? Amend it:
+
+```bash
+git commit --amend -s --no-edit
+```
+
+To sign off every commit on an existing branch in one go:
+
+```bash
+git rebase --signoff origin/main
+```
 
 ## Contribution Guidelines
 
