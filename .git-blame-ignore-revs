@@ -1,0 +1,8 @@
+# Commits listed here are ignored by `git blame` so that bulk
+# reformatting commits don't obscure authorship of real changes.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Apply ruff format and lint autofixes across the codebase (#102)
+c8d4a4ab79cc9e22cc0d5de264ec6d1a2b412d08
