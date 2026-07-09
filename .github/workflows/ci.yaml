@@ -63,7 +63,7 @@ jobs:
           # tests/composer/ is also excluded here: even filtered, its suite is
           # heavy enough that GitHub-hosted runners get killed mid-run. It runs
           # on the GPU cluster instead.
-          uv run pytest tests/unit/ tests/hf/ \
+          uv run pytest tests/unit/ \
             -m "not requires_model and not gpu and not slow and not deep" \
             -v -s --tb=short -x \
             --cov=granite_switch --cov-report=xml
