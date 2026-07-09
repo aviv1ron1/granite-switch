@@ -54,9 +54,9 @@ markers = [
 [dependency-groups]
 vllm19     = ["vllm>=0.19.1,<0.20.0"]
 vllm20     = ["vllm>=0.20.0,<0.21.0"]
-dev        = ["pytest", { include-group = "vllm19" }, "granite-switch[hf,compose]"]
-dev-vllm20 = ["pytest", { include-group = "vllm20" }, "granite-switch[hf,compose]"]
-test       = ["pytest", "bitsandbytes", "optimum-quanto", { include-group = "dev" }]
+dev        = ["pytest", "pytest-cov", { include-group = "vllm19" }, "granite-switch[hf,compose]"]
+dev-vllm20 = ["pytest", "pytest-cov", { include-group = "vllm20" }, "granite-switch[hf,compose]"]
+test       = ["pytest", "pytest-cov", "bitsandbytes", "optimum-quanto", { include-group = "dev" }]
 
 [tool.uv]
 default-groups = ["vllm19"]
