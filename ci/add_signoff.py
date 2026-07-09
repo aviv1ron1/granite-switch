@@ -48,7 +48,9 @@ def add_signoff(commit_msg_file: Path) -> bool:
         return False
 
     # Ensure the trailer is separated from the body by a blank line.
-    separator = "" if message.endswith("\n\n") else "\n" if message.endswith("\n") else "\n\n"
+    separator = (
+        "" if message.endswith("\n\n") else "\n" if message.endswith("\n") else "\n\n"
+    )
     commit_msg_file.write_text(f"{message}{separator}{signoff}\n", encoding="utf-8")
     print(f"✍️  Added DCO sign-off: {signoff}")
     return True

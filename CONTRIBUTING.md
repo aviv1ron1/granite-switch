@@ -21,13 +21,18 @@ Or via pip: `pip install uv`
    cd granite-switch
    uv sync --group dev
    ```
-3. Enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, SPDX/DCO checks, and basic hygiene checks):
+3. Enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, SPDX/DCO checks, and basic hygiene checks). pre-commit manages its own isolated environment per hook, so install it as a standalone tool rather than into the project venv:
    ```bash
-   uv run pre-commit install                                  # hooks for staged files
-   uv run pre-commit install --hook-type prepare-commit-msg   # auto-adds your DCO sign-off
-   uv run pre-commit install --hook-type commit-msg           # verifies the DCO sign-off
+   uv tool install pre-commit                              # one-time, isolated — any platform
+   pre-commit install                                      # hooks for staged files
+   pre-commit install --hook-type prepare-commit-msg       # auto-adds your DCO sign-off
+   pre-commit install --hook-type commit-msg               # verifies the DCO sign-off
    git config blame.ignoreRevsFile .git-blame-ignore-revs
    ```
+   > **Don't use `uv run pre-commit`.** `uv run` first syncs the project's default dependency group
+   > (vLLM + CUDA), which fails on macOS and needlessly pulls the GPU stack on Linux. `uv tool
+   > install` (or `pipx`/a system package) installs pre-commit standalone and works on every platform.
+   >
    > **All three `install` commands are required.** `pre-commit install` alone only wires up the
    > staged-file hooks; the DCO hooks run at the `prepare-commit-msg` and `commit-msg` stages and
    > must be installed explicitly. With them in place your sign-off is added automatically — see
