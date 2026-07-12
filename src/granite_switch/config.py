@@ -2,7 +2,7 @@
 """Configuration for Granite model with adapter switching."""
 
 from transformers import GraniteMoeHybridConfig
-
+from transformers import pipeline
 
 class GraniteSwitchConfig(GraniteMoeHybridConfig):
     """Configuration class for GraniteSwitch model.
