@@ -38,7 +38,13 @@ def discover_package_roots(repo: Path) -> tuple[list[Path], set[str]]:
     roots: list[Path] = []
     pyproject = repo / "pyproject.toml"
     if pyproject.exists():
-        cfg = tomllib.loads(pyproject.read_text())
+        try:
+            cfg = tomllib.loads(pyproject.read_text())
+        except tomllib.TOMLDecodeError as e:
+            # Malformed pyproject.toml is check-toml's job to report; don't crash
+            # here. Fall back to the default package roots below.
+            print(f"warning: could not parse pyproject.toml ({e}); using default roots")
+            cfg = {}
         find = (
             cfg.get("tool", {})
             .get("setuptools", {})
