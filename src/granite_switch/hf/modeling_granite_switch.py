@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+
 """Granite model with adapter switching for Hugging Face.
 
 This implementation extends the base Granite model with:
