@@ -40,7 +40,6 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
     """
 
     model_type = "granite_switch"
-    x = 1
 
     def __init__(
         self,
@@ -88,6 +87,8 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         if num_adapters < 0:
             raise ValueError(f"num_adapters must be >= 0, got {num_adapters}")
         self.num_adapters = num_adapters
+
+        x = 1
 
         # Validate adapter_token_ids if provided
         if num_adapters > 0 and adapter_token_ids is not None:
