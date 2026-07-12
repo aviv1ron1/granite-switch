@@ -88,8 +88,6 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             raise ValueError(f"num_adapters must be >= 0, got {num_adapters}")
         self.num_adapters = num_adapters
 
-        x = 1
-
         # Validate adapter_token_ids if provided
         if num_adapters > 0 and adapter_token_ids is not None:
             if len(adapter_token_ids) != num_adapters:
