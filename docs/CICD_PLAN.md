@@ -328,3 +328,4 @@ mypy:
     - run: uv sync --frozen --extra hf --extra compose
     - run: uv run mypy src
 ```
+[dead link](./this_does_not_exist.md)
