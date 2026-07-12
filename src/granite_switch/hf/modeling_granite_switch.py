@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
+#
+# aviv: testing dco
 
 """Granite model with adapter switching for Hugging Face.
 
