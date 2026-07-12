@@ -103,6 +103,16 @@ make test-gpu        # vllm + integration tests
 make test-gpu-full   # + regression suite
 ```
 
+The `composer` and `hf` suites are CPU-runnable but too heavy for the GitHub
+Actions quota, so they are excluded from CI (only `tests/unit/` runs there). Run
+them manually on a machine with adequate RAM/disk — locally or on the cluster:
+
+```bash
+make test-cpu        # unit + composer + hf
+make test-composer   # composer only
+make test-hf         # hf only
+```
+
 ---
 
 ## Coverage
