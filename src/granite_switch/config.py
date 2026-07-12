@@ -40,6 +40,7 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
     """
 
     model_type = "granite_switch"
+    x = 1
 
     def __init__(
         self,
