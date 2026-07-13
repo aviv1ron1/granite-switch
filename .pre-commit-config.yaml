@@ -15,6 +15,12 @@ repos:
       - id: check-toml
       - id: check-yaml
       - id: check-merge-conflict
+        # --assume-in-merge makes the hook scan even when no merge is in
+        # progress. Without it the hook returns early unless .git/MERGE_HEAD
+        # exists, so it would be a no-op in CI's `pre-commit run --all-files`
+        # (a clean checkout is never mid-merge). This lets CI catch conflict
+        # markers that were committed (e.g. via --no-verify).
+        args: [--assume-in-merge]
       - id: check-added-large-files
         # --enforce-all checks every file, not just staged additions, so the
         # hook also runs in CI's `pre-commit run --all-files` (a clean checkout
