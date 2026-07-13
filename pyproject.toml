@@ -78,6 +78,21 @@ conflicts = [
     [{ extra = "tutorials" },  { extra = "vllm20" }],
 ]
 
+[tool.coverage.run]
+source = ["granite_switch"]
+# CI's coverage run executes only tests/unit/ (the CPU-safe set — see docs/CICD_PLAN.md).
+# The subpackages below are structurally untestable there: they need a GPU, real model
+# checkpoints, or deps CI doesn't install (vLLM/tutorials). Their coverage is measured on
+# the GPU cluster, not here. Omitting them keeps the CI coverage number meaningful — it
+# reports "of the code the unit suite is responsible for, how much is covered" — instead of
+# being diluted to ~1% by thousands of unreachable GPU-only lines.
+omit = [
+    "*/granite_switch/hf/*",
+    "*/granite_switch/vllm/*",
+    "*/granite_switch/composer/*",
+    "*/granite_switch/tutorials/*",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
