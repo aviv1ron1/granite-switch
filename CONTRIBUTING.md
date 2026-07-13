@@ -21,6 +21,17 @@ Or via pip: `pip install uv`
    cd granite-switch
    uv sync --group dev
    ```
+   > **On macOS (or any machine without a CUDA GPU):** the `dev` group pulls in vLLM + CUDA,
+   > which have no macOS wheels, so `uv sync --group dev` fails. Install the CPU-only subset
+   > instead — enough for unit, HF, and compose work:
+   > ```bash
+   > uv sync --frozen --no-default-groups --extra hf --extra compose
+   > ```
+   > `--no-default-groups` skips the default `vllm19` group; `--frozen` installs from the existing
+   > `uv.lock` without re-resolving (a re-resolve would also fail on the CUDA wheels). To run the
+   > CPU test suites the same way, prefix pytest with the same flags, e.g.
+   > `uv run --frozen --no-default-groups --extra hf --extra compose pytest tests/unit tests/hf tests/composer`.
+   > vLLM and integration tests are Linux + GPU only and cannot run locally on macOS.
 3. Enable the project's pre-commit hooks (ruff, nbstripout, link/import validation, SPDX/DCO checks, and basic hygiene checks). pre-commit manages its own isolated environment per hook, so install it as a standalone tool rather than into the project venv:
    ```bash
    uv tool install pre-commit                              # one-time, isolated — any platform
