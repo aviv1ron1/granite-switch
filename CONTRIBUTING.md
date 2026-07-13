@@ -27,8 +27,10 @@ Or via pip: `pip install uv`
    > ```bash
    > uv sync --frozen --no-default-groups --extra hf --extra compose
    > ```
-   > `--no-default-groups` skips the default `vllm19` group; `--frozen` installs from the existing
-   > `uv.lock` without re-resolving (a re-resolve would also fail on the CUDA wheels). To run the
+   > `--no-default-groups` skips the default `vllm19` group; `--frozen` installs strictly from the
+   > committed `uv.lock` without modifying it. (What fails on macOS is *installing* the vLLM/CUDA
+   > wheels — resolving the lockfile with `uv lock` works fine, so the `uv-lock` pre-commit hook runs
+   > locally too; the CPU subset above simply never installs those wheels.) To run the
    > CPU test suites the same way, prefix pytest with the same flags, e.g.
    > `uv run --frozen --no-default-groups --extra hf --extra compose pytest tests/unit tests/hf tests/composer`.
    > vLLM and integration tests are Linux + GPU only and cannot run locally on macOS.
