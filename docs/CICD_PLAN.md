@@ -80,6 +80,27 @@ Coverage is uploaded to [Codecov](https://codecov.io) after each test run (see [
 > **SPDX headers** are checked by the `check-headers` hook inside the `pre-commit` job above —
 > there is no separate headers workflow, so CI enforces them identically to local.
 
+#### Whole-tree enforcement for `check-added-large-files` and `check-merge-conflict`
+
+Two hygiene hooks act only on git state by default — `check-added-large-files` inspects
+just *staged additions*, and `check-merge-conflict` scans only while a merge is in progress.
+On CI's clean checkout nothing is staged and no merge is underway, so out of the box both
+would pass without examining anything. The configuration therefore runs them across the full
+tree so CI enforces them for real:
+
+- **`check-added-large-files`** is configured with `--enforce-all` and `--maxkb=500`, so every
+  tracked file is size-checked under `pre-commit run --all-files`, not only newly staged ones.
+  `uv.lock` (~2.3 MB) is intentionally large and is excluded via `exclude: ^uv\.lock$`; it is the
+  only file over the limit.
+- **`check-merge-conflict`** is configured with `--assume-in-merge`, so it always scans for
+  conflict markers instead of returning early when no merge is active. This lets CI catch markers
+  that were committed (for example via `--no-verify`). Note that with this setting any line that is
+  exactly `=======` or begins with `<<<<<<< ` / `======= ` / `>>>>>>> ` is treated as a conflict
+  marker — keep that in mind for docs that use such lines (e.g. reStructuredText section underlines).
+
+With these settings, every hook that can meaningfully run against a clean checkout enforces in CI
+exactly as it does locally.
+
 ### `dco.yaml` — DCO sign-off check
 
 **Trigger:** Pull request to `main`
