@@ -54,9 +54,9 @@ markers = [
 [dependency-groups]
 vllm19     = ["vllm>=0.19.1,<0.20.0"]
 vllm20     = ["vllm>=0.20.0,<0.21.0"]
-dev        = ["pytest", { include-group = "vllm19" }, "granite-switch[hf,compose]"]
-dev-vllm20 = ["pytest", { include-group = "vllm20" }, "granite-switch[hf,compose]"]
-test       = ["pytest", "bitsandbytes", "optimum-quanto", { include-group = "dev" }]
+dev        = ["pytest", "pytest-cov", { include-group = "vllm19" }, "granite-switch[hf,compose]"]
+dev-vllm20 = ["pytest", "pytest-cov", { include-group = "vllm20" }, "granite-switch[hf,compose]"]
+test       = ["pytest", "pytest-cov", "bitsandbytes", "optimum-quanto", { include-group = "dev" }]
 
 [tool.uv]
 default-groups = ["vllm19"]
@@ -78,5 +78,42 @@ conflicts = [
     [{ extra = "tutorials" },  { extra = "vllm20" }],
 ]
 
+[tool.coverage.run]
+source = ["granite_switch"]
+# CI's coverage run executes only tests/unit/ (the CPU-safe set — see docs/CICD_PLAN.md).
+# The subpackages below are structurally untestable there: they need a GPU, real model
+# checkpoints, or deps CI doesn't install (vLLM/tutorials). Their coverage is measured on
+# the GPU cluster, not here. Omitting them keeps the CI coverage number meaningful — it
+# reports "of the code the unit suite is responsible for, how much is covered" — instead of
+# being diluted to ~1% by thousands of unreachable GPU-only lines.
+omit = [
+    "*/granite_switch/hf/*",
+    "*/granite_switch/vllm/*",
+    "*/granite_switch/composer/*",
+    "*/granite_switch/tutorials/*",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "RUF"]
+ignore = [
+    "E501",   # line length handled by the formatter
+    "RUF002", # ambiguous unicode in docstrings — intentional math symbols (×, μ, →)
+    "RUF003", # ambiguous unicode in comments — same
+    "RUF012", # mutable class defaults — doesn't fit the config/model-class style
+    "UP038",  # isinstance(x, (A, B)) → A | B — deprecated upstream, slower at runtime
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py files intentionally re-export names; don't strip them as "unused".
+"**/__init__.py" = ["F401"]
+# Tests/tutorials legitimately import after guards (pytest.skipif, sys.path) or in
+# notebook cells (E402), and use short math-style names like `l` (E741).
+"tests/**" = ["E402", "E741"]
+"tutorials/**" = ["E402", "E741"]
