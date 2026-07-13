@@ -155,6 +155,10 @@ Granite Switch was started by IBM Research and is developed in the open. We welc
 Apache-2.0 — see [LICENSE](LICENSE).
 
 ## test bla bla bla
+<<<<<<< HEAD
 test test
 
 ## conflict!!!!!
+=======
+test test test
+>>>>>>> 93243a1f9f9d937cbeb607ef331c5070031c9bab
