@@ -28,12 +28,19 @@ pre-commit install --hook-type prepare-commit-msg   # auto-adds your DCO sign-of
 
 | Hook | What it does | Auto-fix? |
 |------|-------------|-----------|
+| `check-toml` / `check-yaml` | Validates config file syntax | No — blocks commit |
+| `check-merge-conflict` | Blocks commits containing conflict markers (`--assume-in-merge`) | No — blocks commit |
+| `check-added-large-files` | Blocks files over 500 KB (`--maxkb=500 --enforce-all`; `uv.lock` excluded) | No — blocks commit |
+| `check-case-conflict` | Blocks names that collide on case-insensitive filesystems | No — blocks commit |
+| `mixed-line-ending` | Normalizes line endings to LF (`--fix=lf`) | Yes |
+| `end-of-file-fixer` / `trailing-whitespace` | Hygiene | Yes |
 | `ruff-format` | Formats Python files | Yes (reformats, then blocks until staged) |
 | `ruff` | Lints Python files (imports, style) | Yes (fixable issues; then blocks until staged) |
 | `check-headers` | Ensures every `.py` file starts with `# SPDX-License-Identifier: Apache-2.0` | Yes (regenerates, then blocks until staged) |
+| `add-signoff` | Appends `Signed-off-by:` at the `prepare-commit-msg` stage | Yes (adds the trailer for you) |
 | `check-dco` | Validates commit message has `Signed-off-by: Name <email>` | No — blocks commit |
-| `check-toml` / `check-yaml` | Validates config file syntax | No |
-| `end-of-file-fixer` / `trailing-whitespace` | Hygiene | Yes |
+| `validate-links` | Checks broken local links, stale labels, and broken first-party imports in `.ipynb`/`.md`/`.py` | No — blocks commit |
+| `nbstripout` | Strips output cells from Jupyter notebooks | Yes |
 | `uv-lock` | Regenerates `uv.lock` when out of sync with `pyproject.toml` | Yes (regenerates, then blocks until staged) |
 
 ### DCO sign-off
@@ -140,11 +147,19 @@ make test-hf         # hf only
 
 CI runs tests with `pytest-cov` and uploads `coverage.xml` to [Codecov](https://codecov.io). Codecov posts a per-PR diff comment showing which lines added in the PR are covered.
 
+**Coverage is scoped** in `pyproject.toml` under `[tool.coverage.run]`: `source = ["granite_switch"]`
+with the `hf`, `vllm`, `composer`, and `tutorials` subpackages **omitted**. Those need a GPU, real
+model checkpoints, or dependencies CI doesn't install, and are covered on the GPU cluster instead
+(see [Manual: GPU Tests](#manual-gpu-tests)). Without the omit list the CI number would be diluted
+to ~1% by thousands of lines the unit suite can never reach; with it, the reported percentage
+reflects only the code the unit suite is actually responsible for.
+
 **One-time setup (repo admin):**
 1. Sign up at [codecov.io](https://codecov.io) and link the repository
 2. Add the `CODECOV_TOKEN` secret to the repository (`Settings` → `Secrets and variables` → `Actions`)
 
-Until the token is configured, coverage upload silently no-ops (`fail_ci_if_error: false`) and does not block CI.
+Until the token is configured, an upload failure is non-fatal (`fail_ci_if_error: false`): the
+upload step logs the error but the build stays green and CI is not blocked.
 
 ---
 
