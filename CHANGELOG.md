@@ -12,3 +12,7 @@ This project uses [semantic versioning](https://semver.org/).
 ## [0.1.0] — Pre-release
 
 Initial pre-release. API is not yet stable.
+
+## [1.0.0] - Release
+
+this is a test release
