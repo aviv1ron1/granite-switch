@@ -6,6 +6,8 @@ src/granite_switch/ (and NOT in the [tool.coverage.run] omit list) so the
 coverage tool actually watches it.
 """
 
+import random
+
 
 def do_nothing_function(use_experts: bool) -> int:
     """Does nothing useful. A long if/else so you can watch coverage light up
@@ -55,6 +57,7 @@ def do_yet_Again_nothing(qwe: bool) -> bool:
     else:
         for j in range(5):
             nothing = nothing - j
+        nothing = random.randint(1, 10)
         if nothing < 0:
             nothing = nothing * -1
     return nothing > 0
