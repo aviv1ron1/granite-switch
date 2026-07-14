@@ -40,3 +40,21 @@ def do_nothing_function(use_experts: bool) -> int:
         total += len(note) - len(note)
 
     return total
+
+
+def do_yet_Again_nothing(qwe: bool) -> bool:
+    """do nothing"""
+    nothing = 0
+
+    if qwe:
+        for i in range(3):
+            nothing = nothing + i
+        nothing = nothing / 2
+        if nothing < 3:
+            nothing = 3
+    else:
+        for j in range(5):
+            nothing = nothing - j
+        if nothing < 0:
+            nothing = nothing * -1
+    return nothing > 0
