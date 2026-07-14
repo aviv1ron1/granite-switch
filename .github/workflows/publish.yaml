@@ -9,6 +9,10 @@ on:
 jobs:
   build-and-publish:
     name: Build and publish
+    # Only publish to production PyPI from the canonical repo. On forks this
+    # job is skipped, so testing releases in a fork doesn't fire a doomed
+    # production upload (the fork has no trusted publisher on PyPI).
+    if: github.repository == 'generative-computing/granite-switch'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

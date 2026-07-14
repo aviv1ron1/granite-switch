@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Sandbox CD: publishes to TestPyPI (test.pypi.org), NOT production PyPI.
-# Triggered manually so it can be re-run on demand while validating the release
-# pipeline. Mirrors publish.yaml (build -> OIDC trusted-publishing upload) but
-# points uv at the TestPyPI index and uses a separate `testpypi` environment.
+# Runs on GitHub Releases (mirroring the real publish.yaml trigger) and can also
+# be started manually for iteration. Mirrors publish.yaml (build -> OIDC
+# trusted-publishing upload) but points uv at the TestPyPI index and uses a
+# separate `testpypi` environment.
 name: Publish to TestPyPI
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build-and-publish:
