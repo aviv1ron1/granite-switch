@@ -77,6 +77,9 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             **kwargs,
         )
 
+        x = 1
+        num_adapters = x
+
         # Default shared_intermediate_size from intermediate_size.
         # All Granite 4 models use shared_mlp naming; for dense models
         # shared_intermediate_size == intermediate_size.
