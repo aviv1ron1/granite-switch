@@ -41,6 +41,8 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
 
     model_type = "granite_switch"
 
+    from transformers import pipeline
+
     def __init__(
         self,
         num_adapters: int = 0,
