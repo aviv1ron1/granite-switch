@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+
 """Throwaway module for experimenting with code coverage.
 
 Not part of the package API. Delete when you're done playing. It lives under
