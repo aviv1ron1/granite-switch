@@ -9,6 +9,6 @@ This project uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.1.0] — Pre-release
+## [0.1.0] — MVP
 
-Initial pre-release. API is not yet stable.
+Initial MVP release. API is not yet stable.

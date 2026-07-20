@@ -80,7 +80,7 @@ conflicts = [
 
 [tool.coverage.run]
 source = ["granite_switch"]
-# CI's coverage run executes only tests/unit/ (the CPU-safe set — see docs/CICD_PLAN.md).
+# CI's coverage run executes only tests/unit/ (the CPU-safe set — see docs/CICD.md).
 # The subpackages below are structurally untestable there: they need a GPU, real model
 # checkpoints, or deps CI doesn't install (vLLM/tutorials). Their coverage is measured on
 # the GPU cluster, not here. Omitting them keeps the CI coverage number meaningful — it

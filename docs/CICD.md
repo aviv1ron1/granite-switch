@@ -1,6 +1,6 @@
-# CI/CD Plan
+# CI/CD
 
-This document describes the CI/CD setup for granite-switch — what runs locally, what runs on every PR, and the roadmap for future automation.
+This document is the reference for the CI/CD setup for granite-switch — what runs locally, what runs on every PR, and the roadmap for future automation.
 
 ## Local: Pre-commit Hooks
 

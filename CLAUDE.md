@@ -376,29 +376,9 @@ skipped for this reason.
 
 ## Pre-commit
 
-This repo uses [pre-commit](https://pre-commit.com/) with ruff (lint + format), nbstripout,
-a local `validate-links` hook (broken local links, stale labels, and broken first-party imports
-in `.ipynb`/`.md`/`.py`; script lives at `.pre-commit/validate_links.py`), local SPDX-header and
-DCO-signoff checks, `uv-lock`, and the standard hygiene hooks (whitespace, EOF, YAML/TOML
-validity, merge conflicts, large files, case conflicts, line endings).
+**See [docs/CICD.md](docs/CICD.md) for the full CI/CD setup — pre-commit hook list, setup steps, and what runs on every commit vs. in CI.**
 
-After cloning:
-
-```bash
-uv run pre-commit install
-git config blame.ignoreRevsFile .git-blame-ignore-revs
-```
-
-Hooks run on `git commit`. Most are auto-fixing - if a hook modifies files, re-stage and
-commit again. Do NOT use `--no-verify` to bypass; fix the underlying issue instead. Run
-`uv run pre-commit run --all-files` to apply hooks across the full tree, and
-`uv run pre-commit autoupdate` periodically to bump pinned hook versions.
-
-What is intentionally NOT in pre-commit (run in CI instead):
-
-- `pytest` (GPU tests, vLLM - too slow for commit time)
-- `mypy` / type checking (too slow)
-- Notebook execution
+This repo uses [pre-commit](https://pre-commit.com/) (ruff, hygiene hooks, SPDX-header and DCO-signoff checks, and a local link validator) to enforce quality before a commit lands. Hooks run automatically on `git commit` and most are auto-fixing, so re-stage and commit again if a hook modifies files. Do NOT use `--no-verify` to bypass — fix the underlying issue instead.
 
 ## Documentation
 
