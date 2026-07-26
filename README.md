@@ -1,12 +1,12 @@
 # Granite Switch — Build AI models like you build software
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/generative-computing/granite-switch/blob/main/LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![corelib](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Fibm-granite%2Fgranitelib-core-r1.0%3Fexpand%255B%255D%3DdownloadsAllTime&query=%24.downloadsAllTime&label=corelib&logo=huggingface&color=yellow)](https://huggingface.co/ibm-granite/granitelib-core-r1.0)
 [![raglib](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Fibm-granite%2Fgranitelib-rag-r1.0%3Fexpand%255B%255D%3DdownloadsAllTime&query=%24.downloadsAllTime&label=raglib&logo=huggingface&color=yellow)](https://huggingface.co/ibm-granite/granitelib-rag-r1.0)
 [![guardianlib](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Fibm-granite%2Fgranitelib-guardian-r1.0%3Fexpand%255B%255D%3DdownloadsAllTime&query=%24.downloadsAllTime&label=guardianlib&logo=huggingface&color=yellow)](https://huggingface.co/ibm-granite/granitelib-guardian-r1.0)
 
-| [**Browse adapter functions**](https://generative-computing.github.io/granite-switch/adapter_catalog.html) | [Pre-composed Models on HF](https://huggingface.co/ibm-granite/granite-switch-4.1-8b-preview) | [Tutorials](tutorials/README.md) |
+| [**Browse adapter functions**](https://generative-computing.github.io/granite-switch/adapter_catalog.html) | [Pre-composed Models on HF](https://huggingface.co/ibm-granite/granite-switch-4.1-8b-preview) | [Tutorials](https://github.com/generative-computing/granite-switch/blob/main/tutorials/README.md) |
 
 Software is built from libraries — you pick the ones you need, compose them, and ship. Granite Switch brings this to AI models: choose **adapter functions** for RAG, safety, factuality, and more, compose them into a single model, and deploy with one command. Swap or upgrade any component independently, just like updating a dependency.
 
@@ -15,7 +15,7 @@ An adapter function is a LoRA adapter trained to a specific input/output contrac
 Small models with the right adapter functions consistently outperform much larger generalist models on targeted tasks. **Activated LoRA (aLoRA)** makes this practical at scale: all adapter functions share one KV cache, activating on demand — so one deployment serves many capabilities with no memory or latency overhead.
 
 <p align="center">
-  <img src="docs/media/benchmark_animation.svg" alt="Granite Switch: adapters stack, accuracy improves" width="820">
+  <img src="https://raw.githubusercontent.com/generative-computing/granite-switch/main/docs/media/benchmark_animation.svg" alt="Granite Switch: adapters stack, accuracy improves" width="820">
 </p>
 
 ## Key Features
@@ -27,7 +27,7 @@ Small models with the right adapter functions consistently outperform much large
 
 <p align="center">
   <a href="https://generative-computing.github.io/granite-switch/race_live.html">
-    <img src="docs/media/alora_vs_lora_race.png" alt="aLoRA vs LoRA live race telemetry — aLoRA at 5/16 queries done with 74% KV hit rate while LoRA is at 1/16 with 29%" width="820">
+    <img src="https://raw.githubusercontent.com/generative-computing/granite-switch/main/docs/media/alora_vs_lora_race.png" alt="aLoRA vs LoRA live race telemetry — aLoRA at 5/16 queries done with 74% KV hit rate while LoRA is at 1/16 with 29%" width="820">
   </a>
 </p>
 
@@ -135,7 +135,7 @@ New here? Start with a 5-minute notebook and work your way up:
 | [RAG Flow](https://colab.research.google.com/github/generative-computing/granite-switch/blob/main/tutorials/notebooks/rag_flow.ipynb) | Query rewrite + answerability + citations in one model | 30 min | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/generative-computing/granite-switch/blob/main/tutorials/notebooks/rag_flow.ipynb) |
 | [Compose Your Own](https://colab.research.google.com/github/generative-computing/granite-switch/blob/main/tutorials/notebooks/compose_granite_switch.ipynb) | Build a custom checkpoint from adapter function libraries | 15 min | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/generative-computing/granite-switch/blob/main/tutorials/notebooks/compose_granite_switch.ipynb) |
 
-All notebooks run on Colab. See [tutorials/README.md](tutorials/README.md) for the full list and guided learning paths.
+All notebooks run on Colab. See [tutorials/README.md](https://github.com/generative-computing/granite-switch/blob/main/tutorials/README.md) for the full list and guided learning paths.
 
 ## Ecosystem
 
@@ -148,8 +148,8 @@ Granite Switch is part of a coordinated stack:
 
 ## Contributing
 
-Granite Switch was started by IBM Research and is developed in the open. We welcome bug reports, feature requests, and pull requests — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines or open an [issue](https://github.com/generative-computing/granite-switch/issues).
+Granite Switch was started by IBM Research and is developed in the open. We welcome bug reports, feature requests, and pull requests — see [CONTRIBUTING.md](https://github.com/generative-computing/granite-switch/blob/main/CONTRIBUTING.md) for guidelines or open an [issue](https://github.com/generative-computing/granite-switch/issues).
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](https://github.com/generative-computing/granite-switch/blob/main/LICENSE).

@@ -1,0 +1,85 @@
+fail_fast: true
+# Restrict hooks to the pre-commit stage by default so they don't also fire at
+# prepare-commit-msg / commit-msg (which are installed for the DCO hooks below).
+# The two DCO hooks override this with their own explicit `stages:`.
+default_stages: [pre-commit]
+repos:
+  # Config-file validators run first: ruff loads its config from pyproject.toml,
+  # so a malformed pyproject.toml makes ruff itself abort with a parser error
+  # instead of the clean check-toml message. With fail_fast, running check-toml /
+  # check-yaml before ruff means syntax errors are reported by the validator that
+  # exists for that purpose, consistently between local commits and CI --all-files.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+        # --assume-in-merge makes the hook scan even when no merge is in
+        # progress. Without it the hook returns early unless .git/MERGE_HEAD
+        # exists, so it would be a no-op in CI's `pre-commit run --all-files`
+        # (a clean checkout is never mid-merge). This lets CI catch conflict
+        # markers that were committed (e.g. via --no-verify).
+        args: [--assume-in-merge]
+      - id: check-added-large-files
+        # --enforce-all checks every file, not just staged additions, so the
+        # hook also runs in CI's `pre-commit run --all-files` (a clean checkout
+        # has nothing staged, so without this it would be a no-op there).
+        # uv.lock is intentionally large (~2.3 MB) and excluded.
+        args: [--maxkb=500, --enforce-all]
+        exclude: ^uv\.lock$
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: end-of-file-fixer
+        exclude: \.ipynb$
+      - id: trailing-whitespace
+        exclude: \.ipynb$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff-format
+        args: [--config=pyproject.toml]
+      - id: ruff
+        args: [--exit-non-zero-on-fix, --fix, --config=pyproject.toml]
+
+  - repo: local
+    hooks:
+      - id: check-headers
+        name: Check SPDX headers
+        entry: python ci/check_headers.py
+        language: system
+        args: [--fix]
+        files: '^(src|tests)/.*\.py$'
+        pass_filenames: true
+
+      - id: add-signoff
+        name: Add DCO sign-off
+        entry: python ci/add_signoff.py
+        language: system
+        stages: [prepare-commit-msg]
+
+      - id: check-dco
+        name: Check DCO sign-off
+        entry: python ci/check_dco.py
+        language: system
+        stages: [commit-msg]
+
+      - id: validate-links
+        name: Validate links and first-party imports
+        entry: python .pre-commit/validate_links.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: \.(ipynb|md|py)$
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.8.4
+    hooks:
+      - id: uv-lock

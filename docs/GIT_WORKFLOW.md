@@ -23,9 +23,9 @@ git checkout main
 git pull origin main
 git checkout -b feature/your-feature
 
-# 2. Make changes and commit
+# 2. Make changes and commit (-s adds your DCO sign-off)
 git add <files>
-git commit -m "Add feature X"
+git commit -s -m "Add feature X"
 
 # 3. Keep up-to-date with main
 git fetch origin
@@ -57,6 +57,23 @@ Fixes #123
 - "fix bug" (what bug?)
 - "update code" (what changed?)
 - "WIP" (squash before merging)
+
+## Sign-off (DCO)
+
+Every commit must carry a `Signed-off-by:` trailer to certify you agree to the
+[Developer Certificate of Origin](https://developercertificate.org/). The DCO check
+blocks any PR containing an unsigned (non-merge) commit.
+
+```bash
+# Sign off a single commit as you make it
+git commit -s -m "Your commit message"
+
+# Sign off every commit on an existing branch
+git rebase --signoff origin/main
+```
+
+The pre-commit hooks add and verify the sign-off for you automatically once installed.
+See [CICD.md](CICD.md) for the full hook and CI setup.
 
 ## Code Quality
 

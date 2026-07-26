@@ -32,6 +32,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import granite_switch.hf  # noqa: F401 — registers AutoModel
 
+# Whole module downloads a base model + RAG adapters and composes a checkpoint —
+# far too heavy for GitHub-hosted CPU runners; runs on the GPU cluster only.
+pytestmark = [pytest.mark.slow, pytest.mark.requires_model]
+
 SEED = 42
 
 
