@@ -573,45 +573,45 @@ Examples:
         action="store_true",
         default=False,
         help="Enable the audio cascade: add the <|audio|> marker token and set "
-             "asr_enabled in the config so the vLLM backend transcribes audio.",
+        "asr_enabled in the config so the vLLM backend transcribes audio.",
     )
     parser.add_argument(
         "--asr-model",
         type=str,
         default=None,
         help="HF id of the speech-to-text model the audio preprocessor loads. "
-             "Implies --enable-audio. Defaults to a small built-in model when unset.",
+        "Implies --enable-audio. Defaults to a small built-in model when unset.",
     )
     parser.add_argument(
         "--asr-device",
         type=str,
         default="cpu",
         help="Device the ASR model runs on (default: cpu). Use e.g. cuda:0 to "
-             "run transcription on GPU (watch vLLM's KV-cache memory budget).",
+        "run transcription on GPU (watch vLLM's KV-cache memory budget).",
     )
     parser.add_argument(
         "--asr-pipeline-kwargs",
         type=json.loads,
         default=None,
         help="JSON object of extra kwargs merged into the transformers ASR "
-             "pipeline() construction, e.g. '{\"chunk_length_s\": 15}'. Baked "
-             "into the checkpoint config. Implies --enable-audio.",
+        "pipeline() construction, e.g. '{\"chunk_length_s\": 15}'. Baked "
+        "into the checkpoint config. Implies --enable-audio.",
     )
     parser.add_argument(
         "--asr-generate-kwargs",
         type=json.loads,
         default=None,
         help="JSON object of default decode kwargs applied on every "
-             "transcription, e.g. '{\"language\": \"de\", \"task\": "
-             "\"transcribe\"}' for multilingual Whisper. Per-request "
-             "mm_processor_kwargs override these. Implies --enable-audio.",
+        'transcription, e.g. \'{"language": "de", "task": '
+        '"transcribe"}\' for multilingual Whisper. Per-request '
+        "mm_processor_kwargs override these. Implies --enable-audio.",
     )
     parser.add_argument(
         "--asr-max-audio-clips",
         type=int,
         default=None,
         help="Max audio clips accepted per request (default 32). Implies "
-             "--enable-audio.",
+        "--enable-audio.",
     )
     parser.add_argument(
         "--asr-self-chunks",
@@ -619,28 +619,28 @@ Examples:
         action="store_true",
         default=None,
         help="Backend chunks long audio itself (Whisper default). Mutually "
-             "exclusive with --asr-no-self-chunks.",
+        "exclusive with --asr-no-self-chunks.",
     )
     parser.add_argument(
         "--asr-no-self-chunks",
         dest="asr_self_chunks",
         action="store_false",
         help="Route long audio through the encoder-agnostic split/merge chunker "
-             "(for backends with a fixed input window). Implies --enable-audio.",
+        "(for backends with a fixed input window). Implies --enable-audio.",
     )
     parser.add_argument(
         "--asr-chunk-length-s",
         type=float,
         default=None,
         help="Chunker window length in seconds (default 30.0). Only used when "
-             "the backend does not self-chunk. Implies --enable-audio.",
+        "the backend does not self-chunk. Implies --enable-audio.",
     )
     parser.add_argument(
         "--asr-chunk-overlap-s",
         type=float,
         default=None,
         help="Chunker window overlap in seconds (default 5.0). Only used when "
-             "the backend does not self-chunk. Implies --enable-audio.",
+        "the backend does not self-chunk. Implies --enable-audio.",
     )
     return parser
 

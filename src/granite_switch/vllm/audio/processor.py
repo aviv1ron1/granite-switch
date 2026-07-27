@@ -26,11 +26,9 @@ switch is needed here.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Optional
 
 import torch
 from transformers import BatchFeature
-
 from vllm.multimodal.inputs import (
     MultiModalFieldConfig,
     MultiModalKwargsItems,
@@ -41,9 +39,9 @@ from vllm.multimodal.parse import (
     MultiModalDataParser,
 )
 from vllm.multimodal.processing import (
+    BaseDummyInputsBuilder,
     BaseMultiModalProcessor,
     BaseProcessingInfo,
-    BaseDummyInputsBuilder,
     PromptReplacement,
     PromptUpdate,
 )
@@ -75,7 +73,7 @@ class GraniteSwitchASRProcessingInfo(BaseProcessingInfo):
     def _asr_enabled(self) -> bool:
         return bool(getattr(self.get_hf_config(), "asr_enabled", False))
 
-    def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
+    def get_supported_mm_limits(self) -> Mapping[str, int | None]:
         # Audio capability is gated per-checkpoint: a non-audio GraniteSwitch
         # reports no modalities, so vLLM never profiles audio or loads ASR.
         if not self._asr_enabled():
@@ -90,7 +88,7 @@ class GraniteSwitchASRProcessingInfo(BaseProcessingInfo):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-    ) -> Optional[Mapping[str, int]]:
+    ) -> Mapping[str, int] | None:
         if not self._asr_enabled():
             return {}
         # Worst-case transcript positions one clip can occupy, used only to size
@@ -167,7 +165,7 @@ class GraniteSwitchASRDummyInputsBuilder(
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Optional[Mapping[str, object]] = None,
+        mm_options: Mapping[str, object] | None = None,
     ) -> MultiModalDataDict:
         num_audios = mm_counts.get("audio", 0)
         length = _DUMMY_AUDIO_SECONDS * _TARGET_SR
@@ -183,7 +181,7 @@ class GraniteSwitchASRMultiModalProcessor(
     def _transcribe(
         self,
         audio,
-        generate_kwargs: Optional[Mapping[str, object]] = None,
+        generate_kwargs: Mapping[str, object] | None = None,
     ) -> list[int]:
         """Transcribe one audio item to a list of token ids (full transcript).
 

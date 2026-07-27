@@ -16,8 +16,7 @@ import pytest
 
 # Load asr.py directly (bypasses granite_switch.vllm.__init__ -> vLLM import).
 _ASR_PATH = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "src/granite_switch/vllm/audio/asr.py"
+    pathlib.Path(__file__).resolve().parents[2] / "src/granite_switch/vllm/audio/asr.py"
 )
 _spec = importlib.util.spec_from_file_location("gs_asr_under_test", _ASR_PATH)
 asr = importlib.util.module_from_spec(_spec)
@@ -58,10 +57,17 @@ class TestAsNumpy:
 
     def test_duck_typed_tensor(self):
         class FakeTensor:
-            def __init__(self, x): self._x = x
-            def detach(self): return self
-            def cpu(self): return self
-            def numpy(self): return self._x
+            def __init__(self, x):
+                self._x = x
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return self
+
+            def numpy(self):
+                return self._x
 
         ft = FakeTensor(np.arange(4))
         assert np.array_equal(asr._as_numpy(ft), np.arange(4))
@@ -120,7 +126,7 @@ class TestChunkedTranscribe:
         t = asr.ASRTranscriber(model_id="x", device="cpu")
         # Each segment "transcribes" to a token tagged by its sample length, so we
         # can see how many windows were produced and that merge stitched them.
-        t._pipeline = lambda inp, **k: {"text": "seg%d" % len(inp["raw"])}
+        t._pipeline = lambda inp, **k: {"text": f"seg{len(inp['raw'])}"}
         return t
 
     def test_self_chunks_true_is_single_call(self):
@@ -128,8 +134,11 @@ class TestChunkedTranscribe:
         calls = []
         t._pipeline = lambda inp, **k: (calls.append(len(inp["raw"])) or {"text": "x"})
         # 70s clip; with self_chunks the whole thing goes in one call.
-        t.transcribe(np.zeros(70 * 16000, dtype=np.float32), sampling_rate=16000,
-                     self_chunks=True)
+        t.transcribe(
+            np.zeros(70 * 16000, dtype=np.float32),
+            sampling_rate=16000,
+            self_chunks=True,
+        )
         assert len(calls) == 1
         assert calls[0] == 70 * 16000
 
@@ -139,16 +148,22 @@ class TestChunkedTranscribe:
         # samples. The two identical 30s window texts collapse at the seam; the
         # 20s remainder is appended.
         out = t.transcribe(
-            np.zeros(70 * 16000, dtype=np.float32), sampling_rate=16000,
-            self_chunks=False, chunk_length_s=30.0, chunk_overlap_s=5.0,
+            np.zeros(70 * 16000, dtype=np.float32),
+            sampling_rate=16000,
+            self_chunks=False,
+            chunk_length_s=30.0,
+            chunk_overlap_s=5.0,
         )
         assert out == "seg480000 seg320000"
 
     def test_short_clip_single_window(self):
         t = self._fake_pipe_transcriber()
         out = t.transcribe(
-            np.zeros(5 * 16000, dtype=np.float32), sampling_rate=16000,
-            self_chunks=False, chunk_length_s=30.0, chunk_overlap_s=5.0,
+            np.zeros(5 * 16000, dtype=np.float32),
+            sampling_rate=16000,
+            self_chunks=False,
+            chunk_length_s=30.0,
+            chunk_overlap_s=5.0,
         )
         assert out == "seg80000"
 
@@ -208,7 +223,9 @@ class TestGenerateKwargsPassthrough:
             generate_kwargs={"language": "es"},
         )
         # generate_kwargs is forwarded to the pipeline call as a kwarg.
-        assert fake_pipe.call_args_list[-1].kwargs["generate_kwargs"] == {"language": "es"}
+        assert fake_pipe.call_args_list[-1].kwargs["generate_kwargs"] == {
+            "language": "es"
+        }
 
     def test_empty_generate_kwargs_not_passed(self):
         # CTC / non-generative backends must not receive a generate_kwargs kwarg.
@@ -283,5 +300,5 @@ class TestLoadMergesPipelineKwargs:
         kwargs = fake_pipe_factory.call_args.kwargs
         assert kwargs["model"] == "m"
         assert kwargs["task"] == "automatic-speech-recognition"
-        assert kwargs["chunk_length_s"] == 15   # overrode the default 30
-        assert kwargs["batch_size"] == 4        # extra kwarg passed through
+        assert kwargs["chunk_length_s"] == 15  # overrode the default 30
+        assert kwargs["batch_size"] == 4  # extra kwarg passed through

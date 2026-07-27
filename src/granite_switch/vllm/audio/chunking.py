@@ -21,7 +21,6 @@ finds the repeated span at each seam and keeps one copy.
 from __future__ import annotations
 
 import re
-from typing import List
 
 import numpy as np
 
@@ -36,7 +35,7 @@ def split_waveform(
     sr: int,
     window_s: float,
     overlap_s: float,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """Split ``samples`` into overlapping windows of ``window_s`` seconds.
 
     Consecutive windows advance by ``window_s - overlap_s`` seconds, so each pair
@@ -70,7 +69,7 @@ def split_waveform(
     if n <= window:
         return [samples]
 
-    segments: List[np.ndarray] = []
+    segments: list[np.ndarray] = []
     start = 0
     while start < n:
         segments.append(samples[start : start + window])
@@ -85,7 +84,7 @@ def _norm_word(word: str) -> str:
     return re.sub(r"[^\w]+", "", word).lower()
 
 
-def _seam_overlap(prev: List[str], nxt: List[str]) -> int:
+def _seam_overlap(prev: list[str], nxt: list[str]) -> int:
     """Longest k such that the last k words of ``prev`` match the first k of ``nxt``.
 
     Comparison is punctuation/case-insensitive because ASR often renders the
@@ -101,14 +100,14 @@ def _seam_overlap(prev: List[str], nxt: List[str]) -> int:
     return 0
 
 
-def merge_transcripts(transcripts: List[str]) -> str:
+def merge_transcripts(transcripts: list[str]) -> str:
     """Concatenate per-window transcripts, de-duplicating the overlap at each seam.
 
     For each new window, find the longest word-level overlap between the tail of
     the text so far and the head of the new window, and drop that duplicated span
     from the new window before appending. Empty windows are skipped.
     """
-    merged: List[str] = []
+    merged: list[str] = []
     for text in transcripts:
         words = text.split()
         if not words:

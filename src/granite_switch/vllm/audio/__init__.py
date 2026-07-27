@@ -13,10 +13,10 @@ unit-tested on CPU and reused by either the multimodal-processor integration or 
 fallback entrypoint wrapper.
 """
 
-from .asr import ASRTranscriber, DEFAULT_ASR_MODEL_ID, transcribe
+from .asr import DEFAULT_ASR_MODEL_ID, ASRTranscriber, transcribe
 
 __all__ = [
-    "ASRTranscriber",
     "DEFAULT_ASR_MODEL_ID",
+    "ASRTranscriber",
     "transcribe",
 ]

@@ -33,11 +33,11 @@ pytestmark = pytest.mark.skipif(
 
 if _VLLM_AVAILABLE:
     from granite_switch.vllm.audio import processor as proc_mod
-    from granite_switch.vllm.audio.processor import (
-        GraniteSwitchASRProcessingInfo,
-        GraniteSwitchASRMultiModalProcessor,
-    )
     from granite_switch.vllm.audio.asr import DEFAULT_ASR_MODEL_ID
+    from granite_switch.vllm.audio.processor import (
+        GraniteSwitchASRMultiModalProcessor,
+        GraniteSwitchASRProcessingInfo,
+    )
 
 
 def _make_info(*, max_model_len=131072, **cfg_attrs):
@@ -79,9 +79,7 @@ class TestProcessingInfoGating:
         # clip_count), the worst case one clip can occupy. Not a request bound —
         # an oversized transcript is rejected by vLLM's prompt-length check.
         info = _make_info(asr_enabled=True)
-        assert info.get_mm_max_tokens_per_item(20000, {"audio": 1}) == {
-            "audio": 20000
-        }
+        assert info.get_mm_max_tokens_per_item(20000, {"audio": 1}) == {"audio": 20000}
         assert info.get_mm_max_tokens_per_item(20000, {"audio": 4}) == {
             "audio": 20000 // 4
         }
@@ -134,7 +132,9 @@ class TestProcessingInfoAsrAccessors:
         assert info._asr_chunk_overlap_s() == 3.0
 
     def test_max_model_len_from_ctx(self):
-        assert _make_info(asr_enabled=True, max_model_len=16000)._max_model_len() == 16000
+        assert (
+            _make_info(asr_enabled=True, max_model_len=16000)._max_model_len() == 16000
+        )
 
     def test_max_model_len_falls_back_to_position_embeddings(self):
         info = _make_info(asr_enabled=True, max_position_embeddings=4096)
@@ -189,9 +189,7 @@ class TestTranscribeWiring:
         )
         proc = _make_processor(info, monkeypatch, capture)
 
-        ids = proc._transcribe(
-            np.zeros(1600, dtype=np.float32), {"language": "fr"}
-        )
+        ids = proc._transcribe(np.zeros(1600, dtype=np.float32), {"language": "fr"})
         assert ids == [1, 2, 3]
         assert capture["model_id"] == "whisper-x"
         assert capture["pipeline_kwargs"] == {"chunk_length_s": 15}
@@ -224,7 +222,7 @@ class TestCallHfProcessorMerge:
         bf = proc._call_hf_processor(
             prompt="<|audio|>",
             mm_data={"audios": [np.zeros(1600, dtype=np.float32)]},
-            mm_kwargs={"language": "fr"},   # per-request override
+            mm_kwargs={"language": "fr"},  # per-request override
             tok_kwargs={},
         )
         # config 'task' retained, request 'language' wins over config 'de'.
@@ -278,10 +276,12 @@ class TestMultiClipAndBudget:
 
         bf = proc._call_hf_processor(
             prompt="<|audio|> and <|audio|>",
-            mm_data={"audios": [
-                np.zeros(1600, dtype=np.float32),
-                np.zeros(1600, dtype=np.float32),
-            ]},
+            mm_data={
+                "audios": [
+                    np.zeros(1600, dtype=np.float32),
+                    np.zeros(1600, dtype=np.float32),
+                ]
+            },
             mm_kwargs={},
             tok_kwargs={},
         )

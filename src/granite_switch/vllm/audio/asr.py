@@ -23,7 +23,8 @@ Design notes:
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from collections.abc import Mapping
+from typing import Any, Union
 
 import numpy as np
 
@@ -58,6 +59,7 @@ def _load_chunking():
     _CHUNKING = _chunking
     return _CHUNKING
 
+
 # Sample rate expected by Whisper-family feature extractors.
 _TARGET_SAMPLE_RATE = 16_000
 
@@ -65,7 +67,7 @@ _TARGET_SAMPLE_RATE = 16_000
 AudioInput = Union[
     np.ndarray,
     "list[float]",
-    Tuple[np.ndarray, Union[int, float]],
+    tuple[np.ndarray, int | float],
     "object",  # torch.Tensor — typed loosely to avoid importing torch here
 ]
 
@@ -81,14 +83,14 @@ class ASRTranscriber:
         self,
         model_id: str = DEFAULT_ASR_MODEL_ID,
         device: str = "cpu",
-        pipeline_kwargs: Optional[Mapping[str, Any]] = None,
+        pipeline_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         self.model_id = model_id
         self.device = device
         # Extra kwargs merged into the pipeline() construction. Because they
         # change the built pipeline, get_transcriber folds them into the cache
         # key so distinct construction options get distinct cached instances.
-        self.pipeline_kwargs: Dict[str, Any] = dict(pipeline_kwargs or {})
+        self.pipeline_kwargs: dict[str, Any] = dict(pipeline_kwargs or {})
         self._pipeline = None
         self._load_lock = threading.Lock()
 
@@ -112,7 +114,7 @@ class ASRTranscriber:
             # Built-in defaults, then let checkpoint-supplied pipeline_kwargs
             # override any of them (e.g. a different chunk_length_s, or model
             # kwargs a non-Whisper backend needs).
-            kwargs: Dict[str, Any] = {
+            kwargs: dict[str, Any] = {
                 "task": "automatic-speech-recognition",
                 "model": self.model_id,
                 "device": self.device,
@@ -127,8 +129,8 @@ class ASRTranscriber:
     def transcribe(
         self,
         audio: AudioInput,
-        sampling_rate: Optional[int] = None,
-        generate_kwargs: Optional[Mapping[str, Any]] = None,
+        sampling_rate: int | None = None,
+        generate_kwargs: Mapping[str, Any] | None = None,
         self_chunks: bool = True,
         chunk_length_s: float = 30.0,
         chunk_overlap_s: float = 5.0,
@@ -182,11 +184,11 @@ class ASRTranscriber:
     def _run_pipeline(
         self,
         samples: np.ndarray,
-        generate_kwargs: Optional[Mapping[str, Any]] = None,
+        generate_kwargs: Mapping[str, Any] | None = None,
     ) -> str:
         """Run the loaded pipeline over an already-resampled mono waveform."""
         # Tell the pipeline the rate so it does not attempt its own resampling.
-        call_kwargs: Dict[str, Any] = {}
+        call_kwargs: dict[str, Any] = {}
         if generate_kwargs:
             call_kwargs["generate_kwargs"] = dict(generate_kwargs)
         result = self._pipeline(
@@ -203,7 +205,7 @@ class ASRTranscriber:
 # the key because they change the constructed pipeline; generate_kwargs are NOT
 # — they are applied per transcribe() call, so one cached pipeline serves them
 # all (that is what makes per-request language selection cheap).
-_TRANSCRIBERS: Dict[Tuple, ASRTranscriber] = {}
+_TRANSCRIBERS: dict[tuple, ASRTranscriber] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -214,10 +216,10 @@ DEFAULT_ALLOWED_REQUEST_GENERATE_KEYS = frozenset({"language", "task"})
 
 
 def resolve_generate_kwargs(
-    config_defaults: Optional[Mapping[str, Any]],
-    request: Optional[Mapping[str, Any]] = None,
-    allowed_keys: "frozenset[str]" = DEFAULT_ALLOWED_REQUEST_GENERATE_KEYS,
-) -> Dict[str, Any]:
+    config_defaults: Mapping[str, Any] | None,
+    request: Mapping[str, Any] | None = None,
+    allowed_keys: frozenset[str] = DEFAULT_ALLOWED_REQUEST_GENERATE_KEYS,
+) -> dict[str, Any]:
     """Merge config-default decode kwargs with allowlisted per-request overrides.
 
     ``config_defaults`` come from ``config.asr_generate_kwargs``. ``request`` is
@@ -227,13 +229,11 @@ def resolve_generate_kwargs(
     so one deployed model can serve many languages. Pure and vLLM-free so it can
     be unit-tested on CPU.
     """
-    merged: Dict[str, Any] = dict(config_defaults or {})
+    merged: dict[str, Any] = dict(config_defaults or {})
     if isinstance(request, Mapping):
         nested = request.get("asr_generate_kwargs")
         if isinstance(nested, Mapping):
-            merged.update(
-                {k: v for k, v in nested.items() if k in allowed_keys}
-            )
+            merged.update({k: v for k, v in nested.items() if k in allowed_keys})
         language = request.get("language")
         if language is not None:
             merged["language"] = language
@@ -250,9 +250,9 @@ def _freeze(value: Any) -> Any:
 
 
 def get_transcriber(
-    model_id: Optional[str] = None,
+    model_id: str | None = None,
     device: str = "cpu",
-    pipeline_kwargs: Optional[Mapping[str, Any]] = None,
+    pipeline_kwargs: Mapping[str, Any] | None = None,
 ) -> ASRTranscriber:
     """Return a process-wide cached :class:`ASRTranscriber`.
 
@@ -277,12 +277,12 @@ def get_transcriber(
 
 def transcribe(
     audio: AudioInput,
-    sampling_rate: Optional[int] = None,
+    sampling_rate: int | None = None,
     *,
-    model_id: Optional[str] = None,
+    model_id: str | None = None,
     device: str = "cpu",
-    pipeline_kwargs: Optional[Mapping[str, Any]] = None,
-    generate_kwargs: Optional[Mapping[str, Any]] = None,
+    pipeline_kwargs: Mapping[str, Any] | None = None,
+    generate_kwargs: Mapping[str, Any] | None = None,
     self_chunks: bool = True,
     chunk_length_s: float = 30.0,
     chunk_overlap_s: float = 5.0,
@@ -305,8 +305,8 @@ def transcribe(
 
 def _coerce_audio(
     audio: AudioInput,
-    sampling_rate: Optional[int],
-) -> Tuple[np.ndarray, int]:
+    sampling_rate: int | None,
+) -> tuple[np.ndarray, int]:
     """Normalize the various accepted audio shapes to ``(np.ndarray, sr)``."""
     # (array, sampling_rate) tuple — vLLM's AudioItem form.
     if isinstance(audio, tuple):

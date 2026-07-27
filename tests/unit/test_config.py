@@ -101,7 +101,6 @@ class TestConfigDefaults:
 
 
 class TestAudioConfig:
-
     def test_asr_defaults_off(self):
         cfg = GraniteSwitchConfig(num_adapters=0)
         assert cfg.asr_enabled is False

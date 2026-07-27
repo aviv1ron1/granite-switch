@@ -71,6 +71,8 @@ granite-switch/
 │   ├── regression/                      # Regression tests (hf/, vllm/, integration/, shared/, tools/)
 │   └── shared/                          # Shared test utilities and parametrized cases
 │
+├── .pre-commit/                         # Pre-commit hook scripts (validate_links.py)
+├── .pre-commit-config.yaml              # Pre-commit hook configuration
 ├── scratch/                             # Throwaway debug/diagnostic scripts (gitignored)
 ├── docs/                                # Documentation
 ├── tutorials/                           # Tutorials and how-to guides
@@ -371,6 +373,12 @@ with the upstream HF model is not achievable. The vLLM skinning equivalence test
 authoritative check — both the upstream and skinned models use the same fused-projection
 architecture there. The HF skinning tests in `tests/composer/test_skinning_equivalence.py` are
 skipped for this reason.
+
+## Pre-commit
+
+**See [docs/CICD.md](docs/CICD.md) for the full CI/CD setup — pre-commit hook list, setup steps, and what runs on every commit vs. in CI.**
+
+This repo uses [pre-commit](https://pre-commit.com/) (ruff, hygiene hooks, SPDX-header and DCO-signoff checks, and a local link validator) to enforce quality before a commit lands. Hooks run automatically on `git commit` and most are auto-fixing, so re-stage and commit again if a hook modifies files. Do NOT use `--no-verify` to bypass — fix the underlying issue instead.
 
 ## Documentation
 
