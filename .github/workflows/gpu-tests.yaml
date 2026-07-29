@@ -1,23 +1,152 @@
 # SPDX-License-Identifier: Apache-2.0
-
 name: GPU Tests
 
 on:
-  workflow_dispatch:   # admin-only trigger (requires write access)
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full commit SHA to test (exact checkout on Vela)."
+        required: true
+        type: string
+      pr_number:
+        description: "PR number to comment on (optional; status is always posted to the SHA)."
+        required: false
+        type: string
+
+  # ---- TEMPORARY BRINGUP TRIGGER — uncomment to test before merging ---------
+  # workflow_dispatch only appears once this file is on the DEFAULT branch, so a
+  # PR branch alone gives you no "Run workflow" button. A push trigger has no
+  # such restriction: it fires on whatever branch contains the file, letting you
+  # validate end-to-end without committing to main first.
+  #
+  # Safe to use: only accounts with write access can push branches to this repo
+  # (fork PRs cannot), so this does NOT open the hole the dispatch-only design
+  # closes — and the `gpu` Environment approval still gates every run.
+  #
+  # On a push event the `sha`/`pr_number` inputs are empty, so the job-level
+  # TARGET_SHA below falls back to github.sha (the pushed commit) and the sticky
+  # comment step simply skips (it is conditional on pr_number). The commit status
+  # is still posted, so you see the result on the branch's commit.
+  # REMOVE THIS BLOCK BEFORE MERGING.
+  #
+  # push:
+  #   branches: [bringup/gpu-ci]
+  # --------------------------------------------------------------------------
+
+push:
+  branches: ['cicd-gpu-tests-*']
+
+# Per-SHA concurrency: re-dispatching the same commit cancels its stale run.
+# Different PRs (different SHAs) may run in parallel; excess Vela pods simply
+# sit Pending until GPUs free up. Switch to a constant group to serialize.
+concurrency:
+  group: gpu-tests-${{ inputs.sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  statuses: write        # post the commit status check
+  pull-requests: write   # post/update the sticky PR comment
+  contents: read
 
 jobs:
   gpu-tests:
-    name: GPU Tests
+    name: GPU Tests (vllm + integration)
     runs-on: [self-hosted, gpu]
+    # The admin gate: this environment must have required reviewers configured
+    # in repo Settings → Environments → gpu. Every run pauses here for approval.
+    environment: gpu
+    # Resolve the commit under test once. `inputs.sha` is set on a
+    # workflow_dispatch; on a push event (the temporary bringup trigger above) the
+    # inputs are empty, so fall back to the pushed commit. Every step below uses
+    # TARGET_SHA so both trigger types behave identically.
+    env:
+      TARGET_SHA: ${{ inputs.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - run: uv sync --frozen --group dev --extra hf --extra vllm --extra compose
-
-      - name: Run GPU tests
+      # No checkout of the tooling: submit_and_poll.sh + the Vela job template
+      # are baked into the listener image at /opt/gsw (built from the internal
+      # granite-switch-tests-runner repo on github.ibm.com). Keeping the tooling
+      # off github.com avoids a cross-instance checkout and keeps internal infra
+      # details (Vela endpoints, namespace) out of this public repo.
+      - name: Post pending status
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          uv run pytest tests/vllm/ tests/integration/ -v -s --tb=short -x
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ env.TARGET_SHA }}" \
+            -f state=pending \
+            -f context="gpu-tests (vllm+integration)" \
+            -f description="GPU tests running on Vela…" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Run GPU tests on Vela
+        id: run
+        run: |
+          set -o pipefail
+          # Tee the whole run so we can attach it as an artifact and excerpt it
+          # into the PR comment regardless of pass/fail. The script is baked into
+          # the listener image at /opt/gsw (see deploy/Dockerfile).
+          /opt/gsw/submit_and_poll.sh --sha "${{ env.TARGET_SHA }}" 2>&1 | tee gpu-tests.log
+        # KUBECONFIG is provided by the runner pod's environment (mounted Vela
+        # SA kubeconfig) — not a GitHub secret. See deploy/ for how it's wired.
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-tests-log-${{ env.TARGET_SHA }}
+          path: gpu-tests.log
+          if-no-files-found: warn
+
+      - name: Post final commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ steps.run.outcome }}" == "success" ]]; then
+            STATE=success; DESC="GPU tests passed"
+          else
+            STATE=failure; DESC="GPU tests failed"
+          fi
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ env.TARGET_SHA }}" \
+            -f state="$STATE" \
+            -f context="gpu-tests (vllm+integration)" \
+            -f description="$DESC" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Update sticky PR comment
+        if: always() && inputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ steps.run.outcome }}" == "success" ]]; then
+            ICON="✅"; VERDICT="passed"
+          else
+            ICON="❌"; VERDICT="failed"
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Marker line lets us find-and-update instead of spamming new comments.
+          MARKER="<!-- gpu-tests-sticky -->"
+
+          # Build the comment body in a file (no heredoc — the closing delimiter
+          # can't sit at column 0 inside a YAML block scalar). printf '%s\n'
+          # writes each line; the log excerpt is appended verbatim.
+          {
+            printf '%s\n' "$MARKER"
+            printf '### %s GPU tests %s — `vllm + integration`\n\n' "$ICON" "$VERDICT"
+            printf 'Commit: `%s`\n' "${{ env.TARGET_SHA }}"
+            printf '[Full run & artifact log](%s)\n\n' "$RUN_URL"
+            printf '<details><summary>Last 40 log lines</summary>\n\n'
+            printf '```\n'
+            tail -n 40 gpu-tests.log 2>/dev/null || printf '(no log captured)\n'
+            printf '```\n</details>\n'
+          } > comment.md
+
+          # Find an existing sticky comment on this PR and PATCH it; else POST.
+          # --field reads the body from a file with @ to avoid arg-length and
+          # quoting problems with multi-line markdown.
+          EXISTING="$(gh api "repos/${{ github.repository }}/issues/${{ inputs.pr_number }}/comments" \
+            --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)"
+          if [[ -n "$EXISTING" ]]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$EXISTING" -F body=@comment.md
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${{ inputs.pr_number }}/comments" -F body=@comment.md
+          fi
