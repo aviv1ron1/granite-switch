@@ -33,8 +33,8 @@ on:
   #   branches: [bringup/gpu-ci]
   # --------------------------------------------------------------------------
 
-push:
-  branches: ['cicd-gpu-tests-*']
+  push:
+    branches: ['cicd-gpu-tests-*']
 
 # Per-SHA concurrency: re-dispatching the same commit cancels its stale run.
 # Different PRs (different SHAs) may run in parallel; excess Vela pods simply
