@@ -67,6 +67,7 @@ from granite_switch.composer.tokenizer_setup import (
     configure_chat_template,
     get_alora_first_invocation_token_id,
 )
+from granite_switch.config import ASR_DTYPES
 
 # ---------------------------------------------------------------------------
 # Utility helpers (kept local — not worth a separate module)
@@ -590,6 +591,16 @@ Examples:
         "run transcription on GPU (watch vLLM's KV-cache memory budget).",
     )
     parser.add_argument(
+        "--asr-dtype",
+        type=str,
+        default=None,
+        choices=ASR_DTYPES,
+        help="Precision the ASR weights load in. Default derives it from "
+        "--asr-device (float16 on CUDA, float32 on CPU); set float32 for an "
+        "encoder that cannot run in half precision (e.g. one with BatchNorm). "
+        "Implies --enable-audio.",
+    )
+    parser.add_argument(
         "--asr-pipeline-kwargs",
         type=json.loads,
         default=None,
@@ -852,6 +863,7 @@ def build():
     audio_enabled = (
         args.enable_audio
         or args.asr_model is not None
+        or args.asr_dtype is not None
         or args.asr_pipeline_kwargs is not None
         or args.asr_generate_kwargs is not None
         or args.asr_max_audio_clips is not None
@@ -934,6 +946,7 @@ def build():
         model.config.asr_enabled = True
         model.config.asr_model_id = args.asr_model
         model.config.asr_device = args.asr_device
+        model.config.asr_dtype = args.asr_dtype
         # Optional pipeline-construction extras and default decode kwargs. Only
         # set when provided so the config stays minimal for the common case.
         if args.asr_pipeline_kwargs is not None:
@@ -953,7 +966,9 @@ def build():
         print(
             f"  Audio cascade enabled "
             f"(asr_model_id={args.asr_model or 'default'}, "
-            f"asr_device={args.asr_device}, audio_token_id={audio_token_id}, "
+            f"asr_device={args.asr_device}, "
+            f"asr_dtype={args.asr_dtype or 'auto'}, "
+            f"audio_token_id={audio_token_id}, "
             f"pipeline_kwargs={args.asr_pipeline_kwargs or {}}, "
             f"generate_kwargs={args.asr_generate_kwargs or {}}, "
             f"max_audio_clips={args.asr_max_audio_clips or 'default'}, "

@@ -1,29 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """End-to-end vLLM serving smoke for the audio cascade (issue #47).
 
-Boots a real composed, audio-enabled GraniteSwitch checkpoint under vLLM and
-drives the three request shapes the #47 checklist calls out as the serving
-smoke — **text + adapter + audio x1/x2/x3** — through one live engine. This is
-the path the low-level tests deliberately bypass (CUDA graphs, torch.compile,
-the ASR processor running inside vLLM's EngineCore subprocess, the multi-clip
-splice, and generation), so it is the only test that proves those pieces
-compose at serve time.
+Drives text + adapter + audio x1/x2/x3 through one live engine — the serve-time
+path the low-level tests bypass (CUDA graphs, the ASR processor inside vLLM's
+EngineCore subprocess, the multi-clip splice, generation).
 
-Scope is a *smoke*: each request must complete and return well-formed output,
-and multi-clip requests must be accepted up to the checkpoint's declared clip
-ceiling. It intentionally does NOT assert transcript content — transcription
-quality (WER) and adapter-routing correctness are separate #47 boxes covered by
-the eval harness and `test_switch_e2e_compose.py` respectively. Synthetic audio
-keeps the test asset-free; a silent/tonal clip exercises the serving plumbing
-without shipping a speech fixture.
+Deliberately does NOT assert transcript content: WER and adapter-routing
+correctness are separate boxes, covered by the eval harness and
+test_switch_e2e_compose.py. Synthetic tones keep the test asset-free.
 
-Model construction goes through the compose CLI (CLAUDE.md gotcha #5): no test
-hand-assembles a config. Audio is enabled with `--enable-audio`, which defaults
-the ASR front-end to the small built-in model (distil-whisper/distil-small.en)
-to keep CI cost down.
-
-Markers: @pytest.mark.slow + @pytest.mark.requires_model + @pytest.mark.gpu.
-CI must opt in explicitly: `pytest -m "slow and requires_model and gpu"`.
+Opt in explicitly: `pytest -m "slow and requires_model and gpu"`.
 """
 
 import importlib.util
@@ -38,13 +24,8 @@ if importlib.util.find_spec("vllm") is None:
     pytest.skip("requires vLLM installed", allow_module_level=True)
 
 
-# ----------------------------------------------------------------------------
-# Base-model / adapter-library pairs — kept in lockstep with
-# tests/integration/test_switch_e2e_compose.py so the two E2E files exercise
-# the same model matrix. A fast CI profile can pin one pair via -k or the
-# experimental env var below.
-# ----------------------------------------------------------------------------
-
+# Kept in lockstep with test_switch_e2e_compose.py so both E2E files exercise the
+# same model matrix.
 _DEFAULT_BASE_MODEL_PAIRS = [
     ("ibm-granite/granite-4.0-micro", "ibm-granite/granitelib-core-r1.0"),
     ("ibm-granite/granite-4.1-3b", "ibm-granite/granitelib-core-r1.0"),
@@ -52,11 +33,10 @@ _DEFAULT_BASE_MODEL_PAIRS = [
 
 
 def _load_experimental_pairs():
-    """Local/experimental pairings from GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS.
+    """Local pairings from GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS.
 
-    JSON array of {"base": str, "adapter": str}; base/adapter may be HF ids or
-    local paths. The mechanism is committed; the values are not. Mirrors
-    test_switch_e2e_compose.py so both E2E files share one extension knob.
+    JSON array of {"base": str, "adapter": str}, HF ids or local paths. The
+    mechanism is committed; the values are not.
     """
     raw = os.environ.get("GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS", "")
     if not raw:
@@ -85,9 +65,8 @@ _TARGET_SR = 16_000
 def audio_checkpoint(request, tmp_path_factory):
     """Compose one audio-enabled checkpoint per (base, adapter) pair.
 
-    Delegates to the compose CLI (same as test_switch_e2e_compose.py) with
-    `--enable-audio`, then returns the save dir. Module scope amortizes the
-    download-dominated first run across every smoke case for the pair.
+    Goes through the compose CLI, never a hand-assembled config (CLAUDE.md
+    gotcha #5). Module scope amortizes the download across the pair's cases.
     """
     import subprocess
     import sys
@@ -123,8 +102,7 @@ def served(audio_checkpoint):
     """Boot vLLM once for the checkpoint and share it across smoke cases.
 
     Tokenizer init stays ON (unlike the argmax-equivalence test): the ASR
-    processor needs a tokenizer to encode both the prompt and the transcript,
-    and the adapter case needs it to tokenize text around the control token.
+    processor needs it to encode the prompt and the transcript.
     """
     import gc
 
@@ -177,9 +155,8 @@ def test_text_only_serving(served):
 def test_adapter_control_token_serving(served):
     """An adapter control token routes through the switch under serving.
 
-    Correctness of the routing is `test_switch_e2e_compose.py`'s job; here we
-    only prove the switch path runs end-to-end in the live engine without
-    crashing and still generates.
+    Routing correctness is test_switch_e2e_compose.py's job; the bar here is
+    that the switch path runs in the live engine and still generates.
     """
     from vllm import SamplingParams
     from vllm.inputs import TokensPrompt
@@ -203,9 +180,7 @@ def test_adapter_control_token_serving(served):
 def test_audio_clip_serving(served, num_clips):
     """Audio x1/x2/x3: N markers + N clips transcribe, splice, and generate.
 
-    Exercises the multi-clip long-audio serving path through the ASR processor
-    running inside vLLM's engine subprocess. Content is not asserted (WER is a
-    separate #47 box); the bar is a completed request with well-formed output.
+    Content is not asserted; the bar is a completed, well-formed request.
     """
     from vllm import SamplingParams
 

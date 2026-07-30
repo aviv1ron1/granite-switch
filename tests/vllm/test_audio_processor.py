@@ -1,21 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """vLLM-tier tests for the audio ASR multimodal processor.
 
-These exercise the code that lives in ``granite_switch.vllm.audio.processor``
-and therefore needs vLLM importable (the base classes come from vLLM). They do
-NOT need a GPU or a real ASR model: the transcriber is faked, so what is under
-test is our plumbing —
-
-- per-checkpoint gating of the audio modality on ``asr_enabled``,
-- the config accessors for ``asr_model_id`` / ``asr_device`` /
-  ``asr_pipeline_kwargs`` / ``asr_generate_kwargs``,
-- and the Level-2 seam: config-default decode kwargs merged with an allowlisted
-  per-request override (vLLM's ``mm_processor_kwargs``) reaching the transcriber.
-
-The pure merge/kwargs logic itself is unit-tested on CPU in
-``tests/unit/test_asr.py``; this file checks it is wired through the processor.
-
-Requires vLLM installed. Skipped otherwise (e.g. CPU-only dev machines).
+Needs vLLM importable (the base classes come from it) but no GPU and no real ASR
+model — the transcriber is faked, so what is under test is the plumbing: modality
+gating on ``asr_enabled``, the config accessors, and decode kwargs reaching the
+transcriber. The merge logic itself is unit-tested in tests/unit/test_asr.py.
 """
 
 import importlib.util
@@ -43,9 +32,7 @@ if _VLLM_AVAILABLE:
 def _make_info(*, max_model_len=131072, **cfg_attrs):
     """A ProcessingInfo whose get_hf_config() returns a stub config.
 
-    Bypasses __init__ (which needs a full vLLM InputProcessingContext) — we only
-    exercise methods that read the config. A stub ``ctx`` supplies the served
-    ``max_model_len`` used to size the transcript budget.
+    Bypasses __init__, which needs a full vLLM InputProcessingContext.
     """
     info = object.__new__(GraniteSwitchASRProcessingInfo)
     cfg = SimpleNamespace(**cfg_attrs)
@@ -167,10 +154,13 @@ def _make_processor(info, monkeypatch, capture):
             capture["chunk_overlap_s"] = chunk_overlap_s
             return "hello world"
 
-    def fake_get_transcriber(model_id=None, device="cpu", pipeline_kwargs=None):
+    def fake_get_transcriber(
+        model_id=None, device="cpu", pipeline_kwargs=None, dtype=None
+    ):
         capture["model_id"] = model_id
         capture["device"] = device
         capture["pipeline_kwargs"] = pipeline_kwargs
+        capture["dtype"] = dtype
         return FakeTranscriber()
 
     monkeypatch.setattr(proc_mod, "get_transcriber", fake_get_transcriber)
@@ -195,6 +185,19 @@ class TestTranscribeWiring:
         assert capture["pipeline_kwargs"] == {"chunk_length_s": 15}
         assert capture["generate_kwargs"] == {"language": "fr"}
         assert capture["sampling_rate"] == proc_mod._TARGET_SR
+
+    def test_dtype_forwarded_from_config(self, monkeypatch):
+        capture = {}
+        info = _make_info(asr_enabled=True, asr_device="cuda:0", asr_dtype="float32")
+        proc = _make_processor(info, monkeypatch, capture)
+        proc._transcribe(np.zeros(1600, dtype=np.float32), {})
+        assert capture["dtype"] == "float32"
+
+    def test_dtype_defaults_to_none(self, monkeypatch):
+        capture = {}
+        proc = _make_processor(_make_info(asr_enabled=True), monkeypatch, capture)
+        proc._transcribe(np.zeros(1600, dtype=np.float32), {})
+        assert capture["dtype"] is None
 
     def test_empty_generate_kwargs_becomes_none(self, monkeypatch):
         capture = {}
@@ -340,7 +343,9 @@ def _make_processor_transcribing(info, monkeypatch, text, *, ids_for):
     monkeypatch.setattr(
         proc_mod,
         "get_transcriber",
-        lambda model_id=None, device="cpu", pipeline_kwargs=None: FakeTranscriber(),
+        lambda model_id=None, device="cpu", pipeline_kwargs=None, dtype=None: (
+            FakeTranscriber()
+        ),
     )
     return proc
 
@@ -410,7 +415,9 @@ class TestEmptyAndSilentClip:
         monkeypatch.setattr(
             proc_mod,
             "get_transcriber",
-            lambda model_id=None, device="cpu", pipeline_kwargs=None: FakeTranscriber(),
+            lambda model_id=None, device="cpu", pipeline_kwargs=None, dtype=None: (
+                FakeTranscriber()
+            ),
         )
 
         bf = proc._call_hf_processor(

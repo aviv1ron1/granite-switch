@@ -106,8 +106,20 @@ class TestAudioConfig:
         assert cfg.asr_enabled is False
         assert cfg.asr_model_id is None
         assert cfg.asr_device == "cpu"
+        assert cfg.asr_dtype is None
         assert cfg.asr_pipeline_kwargs is None
         assert cfg.asr_generate_kwargs is None
+
+    def test_asr_dtype_round_trip(self, tmp_path):
+        cfg = GraniteSwitchConfig(
+            num_adapters=0, asr_enabled=True, asr_device="cuda:0", asr_dtype="float32"
+        )
+        cfg.save_pretrained(tmp_path)
+        assert GraniteSwitchConfig.from_pretrained(tmp_path).asr_dtype == "float32"
+
+    def test_invalid_asr_dtype_raises(self):
+        with pytest.raises(ValueError, match="asr_dtype"):
+            GraniteSwitchConfig(num_adapters=0, asr_dtype="fp8")
 
     def test_longaudio_defaults(self):
         cfg = GraniteSwitchConfig(num_adapters=0)

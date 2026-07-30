@@ -2,18 +2,14 @@
 """Adapters + audio: the RAG answerability adapter judging a query against a
 document delivered as audio (issue #47).
 
-Covers the "adapters + audio" box. Where test_audio_serving_smoke.py only proves
-an adapter control token doesn't crash the audio path, this checks the switch
-reaches the *correct* verdict when the RAG document arrives as speech.
+Unlike test_audio_serving_smoke.py, which only proves an adapter control token
+doesn't crash the audio path, this checks the switch reaches the *correct*
+verdict when the document arrives as speech.
 
-Document-as-audio: ``documents=[{"text": "<|audio|>"}]`` — the Granite template
-renders each document with ``doc | tojson``, so the marker lands in the
-``<documents>`` block where the ASR processor splices the transcript. The
-``<|answerability|>`` control token is inserted by the same template (aLoRA
-fallback path). Ground truth is one committed speech clip (fixtures/, generated
-with SpeechT5 — MIT) driving both classes; the questions key on content that
-transcribes cleanly, so this tests the decision, not transcription accuracy
-(WER).
+``documents=[{"text": "<|audio|>"}]`` works because the Granite template renders
+each document with ``doc | tojson``, so the marker lands in the ``<documents>``
+block for the ASR processor to splice. Questions key on words that transcribe
+cleanly, so this tests the decision, not WER.
 
 Markers: slow + requires_model + gpu (opt-in via -m).
 """
@@ -37,10 +33,7 @@ _DEFAULT_BASE_MODEL_PAIRS = [
 
 
 def _load_experimental_pairs():
-    """Extra (base, adapter) pairs from GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS.
-
-    JSON array of {"base": str, "adapter": str}; mirrors the other E2E files.
-    """
+    """Extra (base, adapter) pairs from GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS."""
     raw = os.environ.get("GRANITE_SWITCH_EXPERIMENTAL_MODEL_PAIRS", "")
     if not raw:
         return []
@@ -134,8 +127,7 @@ def served(audio_rag_checkpoint):
 
 
 def _answerability_adapter_name(config):
-    # Discovery derives the name from the library layout — match rather than
-    # hard-code, and skip loudly if this checkpoint has no answerability adapter.
+    # Discovery derives the name from the library layout, so match, don't hard-code.
     names = list(getattr(config, "adapter_names", None) or [])
     for name in names:
         if "answerab" in name.lower():
@@ -155,8 +147,6 @@ def speech_clip():
 
 
 def _build_answerability_prompt(tokenizer, adapter_name, question):
-    # documents=[{"text": "<|audio|>"}] places one audio marker in the template's
-    # <documents> block; adapter_name arms the answerability control-token insert.
     return tokenizer.apply_chat_template(
         [{"role": "user", "content": question}],
         documents=[{"text": _AUDIO_MARKER}],
@@ -167,8 +157,7 @@ def _build_answerability_prompt(tokenizer, adapter_name, question):
 
 
 def _parse_label(text):
-    # Adapter emits the bare enum ("answerable"/"unanswerable"), maybe quoted.
-    # Match the longer label first so "answerable" doesn't shadow "unanswerable".
+    # Longer label first, so "answerable" doesn't shadow "unanswerable".
     norm = text.strip().strip('"').strip().lower()
     if "unanswerable" in norm:
         return "unanswerable"

@@ -1,21 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Encoder-agnostic long-audio chunking for the cascade.
 
-A backend with a fixed input window (e.g. a speech encoder that only accepts a
-few seconds at a time) cannot ingest a long clip in one shot. This module splits
-a long waveform into overlapping fixed-length windows and stitches the resulting
-per-window transcripts back into one string — the same job Whisper's internal
-``chunk_length_s`` does, but lifted **above** the backend so *any* transcriber
-inherits long-audio support.
+Splits a waveform into overlapping windows and stitches the per-window
+transcripts, so a backend with a fixed input window inherits long-audio support.
+Windows overlap because a hard cut can split a word; the overlap is therefore
+transcribed twice and the merge keeps one copy.
 
-Kept pure (numpy + stdlib, no vLLM / torch / transformers import) so it unit-
-tests on CPU. The transcriber decides whether to use it via its ``self_chunks``
-flag: backends that already chunk internally (Whisper) bypass this entirely.
-
-Why overlap + dedup: cutting on hard boundaries can split a word across two
-windows, so consecutive windows overlap and each boundary word is whole in at
-least one of them. The overlap region is therefore transcribed twice; the merge
-finds the repeated span at each seam and keeps one copy.
+Pure numpy + stdlib (no torch/transformers) so it unit-tests on CPU.
 """
 
 from __future__ import annotations
@@ -24,9 +15,7 @@ import re
 
 import numpy as np
 
-# Cap on how many trailing/leading words we search for a seam overlap. Comfortably
-# larger than any plausible word count inside a few seconds of overlap, but bounded
-# so the merge stays linear in transcript length.
+# Bounded seam search so the merge stays linear in transcript length.
 _MAX_SEAM_WORDS = 60
 
 
@@ -36,21 +25,10 @@ def split_waveform(
     window_s: float,
     overlap_s: float,
 ) -> list[np.ndarray]:
-    """Split ``samples`` into overlapping windows of ``window_s`` seconds.
+    """Split a 1-D mono waveform into overlapping windows, in order.
 
-    Consecutive windows advance by ``window_s - overlap_s`` seconds, so each pair
-    shares ``overlap_s`` of audio. A clip already shorter than one window is
-    returned as a single segment (no copying/splitting).
-
-    Args:
-        samples: 1-D mono waveform.
-        sr: Sample rate of ``samples`` in Hz.
-        window_s: Window length in seconds (must be > 0).
-        overlap_s: Overlap between consecutive windows in seconds (0 <= overlap_s
-            < window_s).
-
-    Returns:
-        A list of 1-D numpy views/arrays, in order.
+    Windows advance by ``window_s - overlap_s``. A clip shorter than one window
+    is returned as a single segment.
     """
     if window_s <= 0:
         raise ValueError(f"window_s must be > 0, got {window_s}")
@@ -87,9 +65,8 @@ def _norm_word(word: str) -> str:
 def _seam_overlap(prev: list[str], nxt: list[str]) -> int:
     """Longest k such that the last k words of ``prev`` match the first k of ``nxt``.
 
-    Comparison is punctuation/case-insensitive because ASR often renders the
-    overlap region slightly differently on each side of the seam. Returns 0 when
-    there is no matching overlap.
+    Punctuation/case-insensitive: ASR renders the overlap slightly differently on
+    each side of a seam. Returns 0 when nothing matches.
     """
     max_k = min(len(prev), len(nxt), _MAX_SEAM_WORDS)
     for k in range(max_k, 0, -1):
@@ -101,12 +78,7 @@ def _seam_overlap(prev: list[str], nxt: list[str]) -> int:
 
 
 def merge_transcripts(transcripts: list[str]) -> str:
-    """Concatenate per-window transcripts, de-duplicating the overlap at each seam.
-
-    For each new window, find the longest word-level overlap between the tail of
-    the text so far and the head of the new window, and drop that duplicated span
-    from the new window before appending. Empty windows are skipped.
-    """
+    """Concatenate per-window transcripts, de-duplicating the overlap at each seam."""
     merged: list[str] = []
     for text in transcripts:
         words = text.split()
