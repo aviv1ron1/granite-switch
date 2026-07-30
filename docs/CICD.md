@@ -118,13 +118,13 @@ Checks that every non-merge commit in the PR has a `Signed-off-by:` line. Skips 
 
 ## Manual: GPU Tests
 
-GPU tests (`tests/vllm/`, `tests/integration/`) cannot run on GitHub-hosted runners. They are triggered manually by repository admins via the `gpu-tests.yaml` workflow.
+GPU tests (`tests/vllm/`, `tests/integration/`) cannot run on GitHub-hosted runners. They run on a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) with the `gpu` label, via the `gpu-tests.yaml` workflow.
 
-**Trigger:** `workflow_dispatch` — only users with write access to the repo can trigger this from the GitHub UI (`Actions` → `GPU Tests` → `Run workflow`).
+**Trigger:** comment `/gpu-test` on a pull request. Only users with the **Maintain** or **Admin** role can launch a run; anyone else gets a 👎 and a reply explaining why. The workflow can also be dispatched directly (`Actions` → `GPU Tests` → `Run workflow`), which enforces the same role check.
 
-**Current state:** The workflow is scaffolded but inert until a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) with the `gpu` label is registered on a machine inside the IBM network. No code changes are needed when the runner is set up — just register it.
+Both vLLM lines (`vllm19` and `vllm20`) are tested as separate matrix legs, since their dependency groups conflict and cannot share an environment. Each leg reports its own commit status and sticky PR comment, and uploads its full log as an artifact.
 
-In the meantime, run GPU tests manually on the HPC environment:
+To run GPU tests yourself on any machine with GPUs:
 
 ```bash
 make test-gpu        # vllm + integration tests
@@ -220,10 +220,9 @@ A running record of rollout milestones actually executed against the plan.
 the full test suite was run to confirm the mechanical changes introduced no
 regressions.
 
-**How:** Submitted to the Vela GPU cluster (namespace `security`, 4 GPUs,
-`vllm19` dependency group) via a job config derived from `tests_on_uv_vllm19.yaml`,
-pointed at the formatted branch. It runs a ruff sanity check followed by all five
-suites with `pytest -n 4`.
+**How:** Submitted to the GPU cluster (`vllm19` dependency group), pointed at the
+formatted branch. It runs a ruff sanity check followed by all five suites with
+`pytest -n 4`.
 
 - Branch under test: `chore/ruff-format` (format commit)
 - Ruff sanity: `ruff check .` → **All checks passed!**; `ruff format --check .` → clean
@@ -259,7 +258,7 @@ very unlikely to stem from PR 1 because:
    integration `test_forward_logit_equivalence`.
 
 **Follow-up:** Confirm the same test also flips a position on unmodified `main`
-(e.g. an integration-only run from `tests_on_uv_vllm19.yaml`). If so, treat it as
+(e.g. an integration-only run on the `vllm19` group). If so, treat it as
 a flaky near-tie test to be addressed separately (tolerance/top-k handling), and
 consider PR 1 cleared.
 
