@@ -209,7 +209,11 @@ class TestGeometry:
 
     def test_geometry_matches_config(self):
         info = _query_geometry()
-        assert info["num_heads"] == 4
+        # !!! TEMPORARY DELIBERATE FAILURE — DO NOT MERGE !!!
+        # Wrong on purpose (the real value is 4) to exercise the GPU CI failure
+        # path: red commit status, the ❌ sticky PR comment, and the dashboard's
+        # `failed` badge. Revert this line to `== 4` before merging anything.
+        assert info["num_heads"] == 5
         assert info["num_kv_heads"] == 2
         assert info["head_dim"] == 64
         assert info["scaling"] == 0.125
