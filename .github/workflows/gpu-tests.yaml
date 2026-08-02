@@ -94,18 +94,64 @@ jobs:
           /opt/gsw/post_status.sh "$TARGET_SHA" pending \
             "GPU tests running on the cluster…" "${{ matrix.label }}"
 
+      # Register the run as in-progress on the internal dashboard, so a multi-hour
+      # run is visible while it is still going rather than only after it ends.
+      # Best-effort by construction: the script exits 0 even when the dashboard is
+      # unreachable or unconfigured, and continue-on-error means a problem here can
+      # never fail the GPU run. The dashboard address is NOT in this file — it comes
+      # from GSW_DASHBOARD_URL on the runner, so nothing internal is disclosed here.
+      - name: Register run start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+          GSW_REPO: ${{ github.repository }}
+          GSW_SHA: ${{ env.TARGET_SHA }}
+          GSW_PR: ${{ inputs.pr_number }}
+          GSW_LABEL: ${{ matrix.label }}
+          GSW_DEP_GROUP: ${{ matrix.dep_group }}
+          GSW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: /opt/gsw/archive_run.sh start
+
       - name: Run GPU tests on the cluster
         id: run
         run: |
           set -o pipefail
-          # Tee the whole run so we can attach it as an artifact and excerpt it
-          # into the PR comment regardless of pass/fail.
+          # Tee the whole run to a RAW log. The raw log carries cluster internals
+          # (namespace, job/pod names, cluster commands) and is never published —
+          # the next step derives a clean report from it.
           /opt/gsw/submit_and_poll.sh \
             --sha "$TARGET_SHA" \
             --repo "$TARGET_REPO" \
-            --dep-group "${{ matrix.dep_group }}" 2>&1 | tee gpu-tests.log
+            --dep-group "${{ matrix.dep_group }}" 2>&1 | tee gpu-tests-raw.log
         # Cluster credentials come from the runner's own environment, never from
         # GitHub secrets — this workflow neither holds nor sees them.
+
+      # The raw log is for cluster debugging and stays on the runner. Everything
+      # published — the artifact and the PR comment — comes from this cleaned
+      # report, which keeps the pytest output verbatim and redacts infrastructure
+      # detail. if: always() so a failed run still produces a readable report.
+      - name: Build public test report
+        if: always()
+        run: /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ matrix.label }}" > gpu-tests.log
+
+      # Ship the RAW log to the internal dashboard — the only place it is kept.
+      # Until now it lived solely in this workspace, where the next matrix leg
+      # overwrote it and a pod restart lost it. Same best-effort contract as the
+      # start step.
+      - name: Archive raw log
+        if: always()
+        continue-on-error: true
+        env:
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+        run: |
+          if [[ "${{ steps.run.outcome }}" == "success" ]]; then
+            /opt/gsw/archive_run.sh finish passed gpu-tests-raw.log
+          elif [[ "${{ steps.run.outcome }}" == "cancelled" ]]; then
+            /opt/gsw/archive_run.sh finish cancelled gpu-tests-raw.log
+          else
+            /opt/gsw/archive_run.sh finish failed gpu-tests-raw.log
+          fi
 
       - name: Upload test log
         if: always()
