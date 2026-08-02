@@ -117,13 +117,22 @@ jobs:
         id: run
         run: |
           set -o pipefail
-          # Tee the whole run to a RAW log. The raw log carries cluster internals
-          # (namespace, job/pod names, cluster commands) and is never published —
-          # the next step derives a clean report from it.
+          # tee keeps the unredacted run in gpu-tests-raw.log for the internal
+          # dashboard, then everything heading for STDOUT is redacted first.
+          #
+          # That last part is not optional: stdout here becomes the GitHub Actions
+          # job log, which is PUBLIC on a public repo and is the surface people
+          # actually open. Piping straight to the console would publish the
+          # namespace, appwrapper/pod names and cluster commands in full, no matter
+          # how carefully the artifact and PR comment are redacted.
+          #
+          # The filter streams, so live progress still shows during a multi-hour run.
           /opt/gsw/submit_and_poll.sh \
             --sha "$TARGET_SHA" \
             --repo "$TARGET_REPO" \
-            --dep-group "${{ matrix.dep_group }}" 2>&1 | tee gpu-tests-raw.log
+            --dep-group "${{ matrix.dep_group }}" 2>&1 \
+            | tee gpu-tests-raw.log \
+            | /opt/gsw/clean_log.sh --filter
         # Cluster credentials come from the runner's own environment, never from
         # GitHub secrets — this workflow neither holds nor sees them.
 
