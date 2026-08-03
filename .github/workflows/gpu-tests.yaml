@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# GPU Tests — launched via /gpu-test, runs on the self-hosted GPU runner.
+# GPU Tests — launched via /gpu-test, /gpu-test-short or /gpu-test-dev, and runs on
+# the self-hosted GPU runner. The three commands differ only in the `suite` input
+# below; each reports under its own status context so a quick check cannot mask a
+# full-suite failure.
 #
 # COPY THIS FILE INTO: granite-switch/.github/workflows/gpu-tests.yaml
 #
@@ -36,14 +39,35 @@ on:
         description: "PR number to comment on (optional; derived from the SHA when omitted)."
         required: false
         type: string
+      # A CLOSED VOCABULARY, not a path string. This is dispatchable by anyone with
+      # *write* access from the Actions tab, and raw paths would reach both a
+      # `sed s#__TEST_PATHS__#…#g` (a literal # breaks the delimiter) and the pod's
+      # `pytest __TEST_PATHS__` command line. Three names resolved in one trusted
+      # place — the step below — removes that surface entirely.
+      #
+      # The mapping lives here rather than in the runner image so changing it needs
+      # no rebuild. It is equally trusted either way: gpu_test_command.sh dispatches
+      # with --ref <default branch>, so this file always comes from main and a pull
+      # request cannot alter its own test scope.
+      suite:
+        description: "Which tests to run: full (all five suites), short (vllm + integration), dev (one fast GPU file)."
+        required: false
+        default: full
+        type: choice
+        options: [full, short, dev]
 
-# Per-SHA concurrency: re-dispatching the same commit cancels its stale run.
-# Different PRs (different SHAs) may run in parallel; excess cluster pods simply
-# sit Pending until GPUs free up. Switch to a constant group to serialize.
+# Per-SHA-and-suite concurrency: re-dispatching the same commit with the same scope
+# cancels its stale run. Different PRs (different SHAs) may run in parallel; excess
+# cluster pods simply sit Pending until GPUs free up.
+#
+# The suite is in the group on purpose. Without it, a quick /gpu-test-dev on a commit
+# would CANCEL the multi-hour /gpu-test already running against it — losing most of a
+# day's work to a two-minute smoke check.
+#
 # NOTE: this is workflow-level, so the matrix legs below share one group and do
 # NOT cancel each other.
 concurrency:
-  group: gpu-tests-${{ inputs.sha || github.sha }}
+  group: gpu-tests-${{ inputs.sha || github.sha }}-${{ inputs.suite || 'full' }}
   cancel-in-progress: true
 
 permissions:
@@ -53,7 +77,9 @@ permissions:
 
 jobs:
   gpu-tests:
-    name: GPU Tests (${{ matrix.label }})
+    # The suite is in the job name because it cannot be read from env.LEG here --
+    # this is evaluated before any step runs.
+    name: GPU Tests (${{ matrix.label }} · ${{ inputs.suite || 'full' }})
     # granite-switch supports two mutually-exclusive vLLM lines and both must be
     # tested. They cannot share a venv (pyproject declares vllm19/vllm20 as
     # conflicting groups), so each gets its own cluster pod. Only the dev* groups
@@ -96,7 +122,65 @@ jobs:
       # runner image at /opt/gsw. Avoids a cross-instance checkout and keeps
       # cluster configuration out of this repo.
 
-      # The gate. First step, before any cluster work is submitted.
+      # Turn the suite NAME into the three things that depend on it, once, so no
+      # later step has to know the mapping. Pure string work — no cluster access, no
+      # credentials — so it is safe to run ahead of the role gate.
+      #
+      #   TEST_PATHS  pytest targets, or empty for the full suite
+      #   JOB_SUFFIX  keeps the cluster job name distinct (see LEG note below)
+      #   LEG         the reporting identity: status context, sticky comment,
+      #               artifact, dashboard label
+      #
+      # LEG matters more than it looks. Everything published keys off it, and if a
+      # narrowed run reused the plain label, a passing /gpu-test-dev would OVERWRITE
+      # a failing /gpu-test — same status context, same sticky-comment marker — and
+      # the PR would look healthy while the full suite was still broken. A full run
+      # keeps the bare label, so existing statuses keep their identity.
+      - name: Resolve test scope
+        env:
+          SUITE: ${{ inputs.suite || 'full' }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          case "$SUITE" in
+            # No --tests at all: submit_and_poll.sh's committed default stays the
+            # single definition of "everything", so adding a suite there needs no
+            # change here.
+            full)
+              PATHS=""
+              SUFFIX=""
+              LEG="$LABEL"
+              ;;
+            # The two suites that need CUDA.
+            short)
+              PATHS="tests/vllm/ tests/integration/"
+              SUFFIX="short"
+              LEG="$LABEL-short"
+              ;;
+            # One fast file that still exercises the GPU — ~30s of pytest, a couple
+            # of minutes end to end once pod startup and uv sync are counted. A
+            # CPU-only pick would pass with a broken CUDA venv.
+            dev)
+              PATHS="tests/vllm/test_single_switch.py"
+              SUFFIX="dev"
+              LEG="$LABEL-dev"
+              ;;
+            # Fail rather than defaulting to full: silently running the wrong scope
+            # is worse than not running, and `type: choice` already rejects unknown
+            # values, so reaching this means something changed upstream.
+            *)
+              echo "::error::unknown suite '$SUITE' — expected full, short or dev"
+              exit 1
+              ;;
+          esac
+          {
+            echo "TEST_PATHS=$PATHS"
+            echo "JOB_SUFFIX=$SUFFIX"
+            echo "LEG=$LEG"
+          } >> "$GITHUB_ENV"
+          echo "suite=$SUITE leg=$LEG tests=${PATHS:-<all five suites>}"
+
+      # The gate. First step that touches anything outside this runner.
       - name: Verify launcher is Maintain/Admin
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,7 +194,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           /opt/gsw/post_status.sh "$TARGET_SHA" pending \
-            "GPU tests running on the cluster…" "${{ matrix.label }}"
+            "GPU tests running on the cluster…" "${{ env.LEG }}"
 
       # Register the run as in-progress on the internal dashboard, so a multi-hour
       # run is visible while it is still going rather than only after it ends.
@@ -122,11 +206,11 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ env.LEG }}
           GSW_REPO: ${{ github.repository }}
           GSW_SHA: ${{ env.TARGET_SHA }}
           GSW_PR: ${{ inputs.pr_number }}
-          GSW_LABEL: ${{ matrix.label }}
+          GSW_LABEL: ${{ env.LEG }}
           GSW_DEP_GROUP: ${{ matrix.dep_group }}
           GSW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         # Nothing this script prints reaches the public console. It is telemetry
@@ -163,12 +247,24 @@ jobs:
           # submits, and needs the same run key the start step used to address the
           # row. Without this the report silently no-ops and the pod column stays
           # empty until finish.
-          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ env.LEG }}
         run: |
+          # Both flags are omitted entirely when empty, which is the `full` case:
+          # no --tests means the script's own default applies, so "everything" has
+          # exactly one definition. Read from env with ${VAR:+...} rather than
+          # interpolated as ${{ }} — the value must reach the script as ONE argument,
+          # and nothing GitHub-controlled belongs in this shell.
+          #
+          # --job-suffix keeps the cluster job name unique per scope. The name is
+          # gsw-gpu-<sha12>-<group>, and the script DELETES a pre-existing job of the
+          # same name before submitting — so without the suffix, launching a dev run
+          # would reap the full run already testing that commit.
           /opt/gsw/submit_and_poll.sh \
             --sha "$TARGET_SHA" \
             --repo "$TARGET_REPO" \
             --dep-group "${{ matrix.dep_group }}" \
+            ${TEST_PATHS:+--tests "$TEST_PATHS"} \
+            ${JOB_SUFFIX:+--job-suffix "$JOB_SUFFIX"} \
             --raw-log gpu-tests-raw.log
         # Cluster credentials come from the runner's own environment, never from
         # GitHub secrets — this workflow neither holds nor sees them.
@@ -186,7 +282,7 @@ jobs:
         if: always()
         run: |
           set -o pipefail
-          /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ matrix.label }}" | tee gpu-tests.log
+          /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ env.LEG }}" | tee gpu-tests.log
 
       # Send the COMPLETE raw log to the internal dashboard — the only place it is
       # kept. The run itself already shipped it in batches, so this is the
@@ -197,7 +293,7 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ env.LEG }}
         # Redirected for the same reason as the start step: nothing here is for a
         # public reader, and the failure path names the internal dashboard host.
         run: |
@@ -215,7 +311,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gpu-tests-log-${{ matrix.label }}-${{ env.TARGET_SHA }}
+          name: gpu-tests-log-${{ env.LEG }}-${{ env.TARGET_SHA }}
           path: gpu-tests.log
           if-no-files-found: warn
 
@@ -226,9 +322,9 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [[ "${{ steps.run.outcome }}" == "success" ]]; then
-            /opt/gsw/post_status.sh "$TARGET_SHA" success "GPU tests passed" "${{ matrix.label }}"
+            /opt/gsw/post_status.sh "$TARGET_SHA" success "GPU tests passed" "${{ env.LEG }}"
           else
-            /opt/gsw/post_status.sh "$TARGET_SHA" failure "GPU tests failed" "${{ matrix.label }}"
+            /opt/gsw/post_status.sh "$TARGET_SHA" failure "GPU tests failed" "${{ env.LEG }}"
           fi
 
       - name: Update sticky PR comment
@@ -242,4 +338,4 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           /opt/gsw/update_sticky_comment.sh "$TARGET_SHA" "${{ steps.run.outcome }}" \
-            gpu-tests.log "${{ matrix.label }}" "$PR_NUMBER"
+            gpu-tests.log "${{ env.LEG }}" "$PR_NUMBER"

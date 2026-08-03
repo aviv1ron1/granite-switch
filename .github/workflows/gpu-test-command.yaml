@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# /gpu-test slash-command launcher.
+# Slash-command launcher for /gpu-test, /gpu-test-short and /gpu-test-dev.
+#
+# The `if:` below is a cheap prefix prefilter, NOT the command parser: it lets any
+# /gpu-test* comment start this job, and gpu_test_command.sh then matches the
+# command exactly and declines anything else. Keeping the list in one place means
+# adding a command does not need an edit here.
 #
 # Deployed to granite-switch as .github/workflows/gpu-test-command.yaml, together
 # with .github/scripts/check_role.sh and .github/scripts/gpu_test_command.sh.
@@ -49,4 +54,8 @@ jobs:
           ACTOR: ${{ github.event.comment.user.login }}
           PR_NUMBER: ${{ github.event.issue.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
-        run: .github/scripts/gpu_test_command.sh "$ACTOR" "$PR_NUMBER" "$COMMENT_ID"
+          # The body decides WHICH scope runs (/gpu-test, -short or -dev). Entirely
+          # attacker-controlled text, so it follows the same rule as the login: env
+          # var, then a quoted positional arg. Never `${{ }}` in a run block.
+          BODY: ${{ github.event.comment.body }}
+        run: .github/scripts/gpu_test_command.sh "$ACTOR" "$PR_NUMBER" "$COMMENT_ID" "$BODY"
