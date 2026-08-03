@@ -67,6 +67,24 @@ jobs:
           - label: vllm20
             dep_group: dev-vllm20
     runs-on: [self-hosted, gpu]
+
+    # MUST be set explicitly. GitHub's default is 360 minutes, which is exactly the
+    # in-pod deadline, so GitHub would cancel the job at the same moment the pod's
+    # own timeout fires -- and the script's watchdog at 390 min could never run at
+    # all. A five-suite run is expected to exceed 360 min outright, so on the
+    # default this job gets cancelled mid-run regardless of whether the tests pass.
+    #
+    # Three related numbers, from innermost out. Raise one and check the others:
+    #   in-pod `timeout`   21600s = 360 min  (submit_and_poll.sh DEADLINE)
+    #   script watchdog    23400s = 390 min  (DEADLINE + 1800)
+    #   this job cap                420 min  (watchdog + 30 min of slack)
+    #
+    # Ordered so the innermost limit is normally what ends a wedged run: the pod
+    # kills its own tests, else the script reaps the job, and GitHub cancelling is
+    # the last resort -- which is the only one of the three that leaves an orphaned
+    # AppWrapper if the SIGTERM trap does not land.
+    timeout-minutes: 420
+
     # Resolve the commit under test once, so every step below agrees on it.
     env:
       TARGET_SHA: ${{ inputs.sha || github.sha }}
@@ -111,7 +129,16 @@ jobs:
           GSW_LABEL: ${{ matrix.label }}
           GSW_DEP_GROUP: ${{ matrix.dep_group }}
           GSW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: /opt/gsw/archive_run.sh start
+        # Nothing this script prints reaches the public console. It is telemetry
+        # for whoever runs the dashboard, of no use to a public reader, and on a
+        # curl failure it quotes the internal service host it could not reach.
+        #
+        # A file rather than /dev/null: the script always exits 0, so this output
+        # is the only evidence archiving failed, and the runner streams step logs
+        # to GitHub rather than to the container console, so `oc logs` would not
+        # show it. Read it with:
+        #   oc exec deploy/gsw-gpu-listener -- tail -40 /tmp/archive_run.log
+        run: /opt/gsw/archive_run.sh start >>/tmp/archive_run.log 2>&1
 
       - name: Run GPU tests on the cluster
         id: run
@@ -131,6 +158,12 @@ jobs:
         # public report from the file (allowlisted -- header fields by name, the
         # pytest block by range), and the archive step ships the full file to the
         # internal dashboard.
+        env:
+          # submit_and_poll.sh reports the pod name to the dashboard as soon as it
+          # submits, and needs the same run key the start step used to address the
+          # row. Without this the report silently no-ops and the pod column stays
+          # empty until finish.
+          GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
         run: |
           /opt/gsw/submit_and_poll.sh \
             --sha "$TARGET_SHA" \
@@ -155,23 +188,28 @@ jobs:
           set -o pipefail
           /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ matrix.label }}" | tee gpu-tests.log
 
-      # Ship the RAW log to the internal dashboard — the only place it is kept.
-      # Until now it lived solely in this workspace, where the next matrix leg
-      # overwrote it and a pod restart lost it. Same best-effort contract as the
-      # start step.
+      # Send the COMPLETE raw log to the internal dashboard — the only place it is
+      # kept. The run itself already shipped it in batches, so this is the
+      # authoritative copy that replaces those: it closes any chunk that failed to
+      # send, and covers the case where nothing shipped at all. Same best-effort
+      # contract as the start step.
       - name: Archive raw log
         if: always()
         continue-on-error: true
         env:
           GSW_RUN_KEY: ${{ github.run_id }}-${{ matrix.label }}
+        # Redirected for the same reason as the start step: nothing here is for a
+        # public reader, and the failure path names the internal dashboard host.
         run: |
-          if [[ "${{ steps.run.outcome }}" == "success" ]]; then
-            /opt/gsw/archive_run.sh finish passed gpu-tests-raw.log
-          elif [[ "${{ steps.run.outcome }}" == "cancelled" ]]; then
-            /opt/gsw/archive_run.sh finish cancelled gpu-tests-raw.log
-          else
-            /opt/gsw/archive_run.sh finish failed gpu-tests-raw.log
-          fi
+          {
+            if [[ "${{ steps.run.outcome }}" == "success" ]]; then
+              /opt/gsw/archive_run.sh finish passed gpu-tests-raw.log
+            elif [[ "${{ steps.run.outcome }}" == "cancelled" ]]; then
+              /opt/gsw/archive_run.sh finish cancelled gpu-tests-raw.log
+            else
+              /opt/gsw/archive_run.sh finish failed gpu-tests-raw.log
+            fi
+          } >>/tmp/archive_run.log 2>&1
 
       - name: Upload test log
         if: always()
