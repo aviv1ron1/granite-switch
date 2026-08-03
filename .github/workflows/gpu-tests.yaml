@@ -115,34 +115,45 @@ jobs:
 
       - name: Run GPU tests on the cluster
         id: run
+        # --raw-log sends the verbose run to a FILE. Nothing verbose reaches this
+        # console, because stdout here is the GitHub Actions job log: PUBLIC on a
+        # public repo, and the surface people actually open. All it receives is the
+        # heartbeat the script synthesizes from a fixed vocabulary of phase words
+        # and elapsed minutes.
+        #
+        # This replaces piping the run through a regex redactor. That worked most
+        # of the time, which is the problem -- a denylist publishes anything it has
+        # no rule for, and it was demonstrably leaking a quoted namespace and a
+        # .svc hostname. Nothing arbitrary is printed here now, so there is nothing
+        # to get wrong.
+        #
+        # The two consumers of the detail are unaffected: the next step builds the
+        # public report from the file (allowlisted -- header fields by name, the
+        # pytest block by range), and the archive step ships the full file to the
+        # internal dashboard.
         run: |
-          set -o pipefail
-          # tee keeps the unredacted run in gpu-tests-raw.log for the internal
-          # dashboard, then everything heading for STDOUT is redacted first.
-          #
-          # That last part is not optional: stdout here becomes the GitHub Actions
-          # job log, which is PUBLIC on a public repo and is the surface people
-          # actually open. Piping straight to the console would publish the
-          # namespace, appwrapper/pod names and cluster commands in full, no matter
-          # how carefully the artifact and PR comment are redacted.
-          #
-          # The filter streams, so live progress still shows during a multi-hour run.
           /opt/gsw/submit_and_poll.sh \
             --sha "$TARGET_SHA" \
             --repo "$TARGET_REPO" \
-            --dep-group "${{ matrix.dep_group }}" 2>&1 \
-            | tee gpu-tests-raw.log \
-            | /opt/gsw/clean_log.sh --filter
+            --dep-group "${{ matrix.dep_group }}" \
+            --raw-log gpu-tests-raw.log
         # Cluster credentials come from the runner's own environment, never from
         # GitHub secrets — this workflow neither holds nor sees them.
 
       # The raw log is for cluster debugging and stays on the runner. Everything
-      # published — the artifact and the PR comment — comes from this cleaned
-      # report, which keeps the pytest output verbatim and redacts infrastructure
-      # detail. if: always() so a failed run still produces a readable report.
+      # published — this console, the artifact and the PR comment — comes from the
+      # cleaned report, which keeps the pytest output verbatim and redacts
+      # infrastructure detail. if: always() so a failed run still produces a
+      # readable report.
+      #
+      # tee, so the report is also printed here: with the verbose run no longer
+      # streaming, this is the only thing that puts test results in the job log,
+      # and "which test failed?" should not require downloading an artifact.
       - name: Build public test report
         if: always()
-        run: /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ matrix.label }}" > gpu-tests.log
+        run: |
+          set -o pipefail
+          /opt/gsw/clean_log.sh gpu-tests-raw.log "${{ matrix.label }}" | tee gpu-tests.log
 
       # Ship the RAW log to the internal dashboard — the only place it is kept.
       # Until now it lived solely in this workspace, where the next matrix leg
