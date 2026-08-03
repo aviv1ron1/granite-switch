@@ -251,9 +251,14 @@ jobs:
         run: |
           # Both flags are omitted entirely when empty, which is the `full` case:
           # no --tests means the script's own default applies, so "everything" has
-          # exactly one definition. Read from env with ${VAR:+...} rather than
-          # interpolated as ${{ }} — the value must reach the script as ONE argument,
+          # exactly one definition. Read from env with ${VAR:+...} rather than through
+          # an Actions expression -- the value must reach the script as ONE argument,
           # and nothing GitHub-controlled belongs in this shell.
+          #
+          # Do NOT write an empty Actions expression anywhere in a run: block, not
+          # even in a comment. Block-scalar content is scanned for expressions (YAML
+          # comments are stripped before that, block scalars are not), so one cost a
+          # dispatch with "HTTP 422 ... An expression was expected".
           #
           # --job-suffix keeps the cluster job name unique per scope. The name is
           # gsw-gpu-<sha12>-<group>, and the script DELETES a pre-existing job of the

@@ -56,6 +56,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
           # The body decides WHICH scope runs (/gpu-test, -short or -dev). Entirely
           # attacker-controlled text, so it follows the same rule as the login: env
-          # var, then a quoted positional arg. Never `${{ }}` in a run block.
+          # var, then a quoted positional arg, never an Actions expression inside the
+          # run block.
           BODY: ${{ github.event.comment.body }}
         run: .github/scripts/gpu_test_command.sh "$ACTOR" "$PR_NUMBER" "$COMMENT_ID" "$BODY"
