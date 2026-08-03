@@ -33,6 +33,13 @@ settings into `config.json` so the checkpoint is self-describing:
   `openai/whisper-small` for multilingual.
 - `asr_device` — `cpu` (default) keeps vLLM's GPU KV-cache budget clean; set
   `--asr-device cuda:0` to run transcription on GPU (watch GPU memory).
+- `asr_dtype` — precision the ASR weights load in. Unset (default) derives it
+  from the device: `float16` on CUDA, `float32` on CPU. Half precision halves
+  the ASR weight footprint and is what the Whisper-family defaults expect, but
+  it is not universally safe — an encoder with **BatchNorm** layers raises
+  `Expected weight to have type Float but got Half`, since BatchNorm will not
+  promote a float16 weight against float32 features. Such a checkpoint needs
+  `--asr-dtype float32`. Accepted: `auto`, `float16`, `bfloat16`, `float32`.
 
 Audio capability is **gated per checkpoint** by `asr_enabled`: a checkpoint built
 without `--enable-audio` reports no audio modality and never loads the ASR model.

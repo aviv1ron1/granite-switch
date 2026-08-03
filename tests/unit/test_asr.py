@@ -7,6 +7,7 @@ fast CPU-tier unit test that runs without the vLLM extra installed, we load the
 leaf module directly by file path rather than through the package.
 """
 
+import contextlib
 import importlib.util
 import pathlib
 from unittest import mock
@@ -282,15 +283,92 @@ class TestResolveGenerateKwargs:
         assert cfg == {"language": "de"}
 
 
+@contextlib.contextmanager
+def _patched_pipeline(factory):
+    """Patch both lookup paths: `from transformers import pipeline` re-resolves to
+    transformers.pipelines.pipeline, but transformers caches it on the top-level
+    module after the first access, so a later test would get the real one."""
+    with (
+        mock.patch("transformers.pipelines.pipeline", factory),
+        mock.patch("transformers.pipeline", factory),
+    ):
+        yield
+
+
+class TestResolveTorchDtype:
+    """asr_dtype resolution. float16-on-CUDA is the default, but overridable."""
+
+    def test_auto_on_cuda_is_float16(self):
+        torch = pytest.importorskip("torch")
+        assert asr._resolve_torch_dtype(None, "cuda:0") is torch.float16
+        assert asr._resolve_torch_dtype("auto", "cuda") is torch.float16
+
+    def test_auto_on_cpu_is_float32(self):
+        torch = pytest.importorskip("torch")
+        assert asr._resolve_torch_dtype(None, "cpu") is torch.float32
+
+    def test_explicit_float32_overrides_cuda_default(self):
+        # The BatchNorm-encoder case: CUDA must not force half precision.
+        torch = pytest.importorskip("torch")
+        assert asr._resolve_torch_dtype("float32", "cuda:0") is torch.float32
+
+    def test_explicit_bfloat16(self):
+        torch = pytest.importorskip("torch")
+        assert asr._resolve_torch_dtype("bfloat16", "cpu") is torch.bfloat16
+
+    @pytest.mark.parametrize(
+        "name,attr",
+        [
+            ("fp16", "float16"),
+            ("half", "float16"),
+            ("bf16", "bfloat16"),
+            ("fp32", "float32"),
+            ("FLOAT32", "float32"),
+        ],
+    )
+    def test_aliases_and_case(self, name, attr):
+        torch = pytest.importorskip("torch")
+        assert asr._resolve_torch_dtype(name, "cpu") is getattr(torch, attr)
+
+    def test_unknown_name_raises(self):
+        pytest.importorskip("torch")
+        with pytest.raises(ValueError, match="Unsupported asr_dtype"):
+            asr._resolve_torch_dtype("int8", "cpu")
+
+    def test_dtype_is_part_of_cache_key(self):
+        a = asr.get_transcriber("dt", "cuda:0", dtype="float32")
+        b = asr.get_transcriber("dt", "cuda:0", dtype="float16")
+        c = asr.get_transcriber("dt", "cuda:0", dtype="float32")
+        assert a is not b
+        assert a is c
+
+    def test_load_passes_resolved_dtype(self):
+        torch = pytest.importorskip("torch")
+        factory = mock.Mock(return_value=mock.Mock())
+        with _patched_pipeline(factory):
+            asr.ASRTranscriber(model_id="m", device="cuda:0", dtype="float32").load()
+        assert factory.call_args.kwargs["torch_dtype"] is torch.float32
+
+    def test_pipeline_kwargs_torch_dtype_still_wins(self):
+        torch = pytest.importorskip("torch")
+        factory = mock.Mock(return_value=mock.Mock())
+        with _patched_pipeline(factory):
+            asr.ASRTranscriber(
+                model_id="m",
+                device="cpu",
+                dtype="float32",
+                pipeline_kwargs={"torch_dtype": torch.bfloat16},
+            ).load()
+        assert factory.call_args.kwargs["torch_dtype"] is torch.bfloat16
+
+
 class TestLoadMergesPipelineKwargs:
     def test_pipeline_kwargs_override_defaults(self):
         # load() must merge config-supplied pipeline_kwargs over the built-in
         # defaults (e.g. override chunk_length_s, add extra kwargs).
         pytest.importorskip("torch")
         fake_pipe_factory = mock.Mock(return_value=mock.Mock())
-        # transformers is a lazy module: `from transformers import pipeline`
-        # re-resolves to transformers.pipelines.pipeline, so patch there.
-        with mock.patch("transformers.pipelines.pipeline", fake_pipe_factory):
+        with _patched_pipeline(fake_pipe_factory):
             t = asr.ASRTranscriber(
                 model_id="m",
                 device="cpu",

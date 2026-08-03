@@ -299,9 +299,8 @@ class GraniteSwitchModel(nn.Module):
                     adapter_token_ids=self.adapter_token_ids,
                 )
             else:
-                # Either no switch, or the multimodal path where vLLM passes
-                # pre-merged inputs_embeds and input_ids is None. ALPHA: audio
-                # requests run on the base model (adapter_id = 0).
+                # No switch, or the multimodal path (input_ids is None because
+                # vLLM pre-merged inputs_embeds): run on base, adapter_id 0.
                 if input_ids is not None:
                     num_tokens = input_ids.shape[0]
                     device = input_ids.device
@@ -429,10 +428,8 @@ class GraniteSwitchForCausalLM(
 
     supports_multimodal = True
 
-    # Force vLLM to pass the raw input_ids to forward() on the multimodal path
-    # (not just precomputed inputs_embeds). The switch needs them to detect
-    # adapter control tokens, so audio requests route through adapters exactly
-    # like text requests.
+    # Without this, the multimodal path passes only inputs_embeds and the switch
+    # cannot see control tokens — audio requests would bypass adapters.
     requires_raw_input_tokens = True
 
     @classmethod

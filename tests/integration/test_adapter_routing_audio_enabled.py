@@ -2,14 +2,10 @@
 """Adapters + audio (issue #47): every default adapter routes to its own index
 on an audio-enabled checkpoint.
 
-Composes the default adapter set (RAG + Core + Guardian) with --enable-audio and
-sweeps every adapter control token that resolved, asserting the switch maps
-``adapter_token_ids[i]`` to index ``i + 1`` and leaves pre-control positions on
-the base (``0``) — i.e. enabling audio does not perturb the token->index map.
-For granite-4.1-3b that is 12 adapters: context_relevance ships no 4.1-3b flavor,
-so 12 of the 13 defined adapters resolve. Complements the single-adapter sweep in
-test_switch_e2e_compose and the serve-time answerability check in
-test_answerability_over_audio.
+Asserts the switch maps ``adapter_token_ids[i]`` to index ``i + 1`` and leaves
+pre-control positions on base (``0``) — enabling audio must not perturb the
+token->index map. For granite-4.1-3b, 12 of the 13 defined adapters resolve
+(context_relevance ships no 4.1-3b flavor).
 
 Markers: slow + requires_model + gpu (opt-in via -m).
 """
@@ -26,8 +22,6 @@ if importlib.util.find_spec("granite_switch.hf") is None:
     pytest.skip("requires the HF backend ([hf] extra)", allow_module_level=True)
 
 
-# The default adapter set is the union of the three granitelib libraries (the
-# "12 adapters"): RAG + Core + Guardian.
 _DEFAULT_ADAPTER_LIBRARIES = [
     "ibm-granite/granitelib-rag-r1.0",
     "ibm-granite/granitelib-core-r1.0",

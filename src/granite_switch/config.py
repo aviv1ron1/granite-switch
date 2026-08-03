@@ -3,6 +3,9 @@
 
 from transformers import GraniteMoeHybridConfig
 
+# Accepted asr_dtype values. Keep in sync with vllm.audio.asr._ASR_DTYPE_NAMES.
+ASR_DTYPES = ("auto", "float16", "bfloat16", "float32")
+
 
 class GraniteSwitchConfig(GraniteMoeHybridConfig):
     """Configuration class for GraniteSwitch model.
@@ -37,56 +40,38 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             Module groups: "qkv_proj", "o_proj", "shared_input_linear", "shared_output_linear".
             Default: all four groups
 
-        Audio (ASR) preprocessing parameters:
-            asr_enabled (bool): When True, the vLLM backend registers an audio
-                multimodal preprocessor that transcribes audio inputs to text and
-                splices the transcript tokens into the prompt before the decoder
-                runs. The decoder itself is unchanged and only ever sees text
-                tokens. Default: False.
-            asr_model_id (Optional[str]): HuggingFace id of the speech-to-text
-                model the preprocessor loads. When None and asr_enabled is True,
-                the backend falls back to a small built-in default. This makes the
-                checkpoint self-describing about which ASR front-end it expects.
+        Audio (ASR) preprocessing parameters (see docs/AUDIO.md):
+            asr_enabled (bool): Register the audio preprocessor that transcribes
+                audio and splices the transcript into the prompt. Default: False.
+            asr_model_id (Optional[str]): HF id of the speech-to-text model. None
+                falls back to a small built-in default.
             asr_device (str): Device the ASR model runs on. Default "cpu" keeps
-                vLLM's GPU KV-cache budget clean; set to a CUDA device to trade GPU
-                memory for transcription latency.
-            asr_pipeline_kwargs (Optional[dict]): Extra keyword arguments merged
-                into the ``transformers.pipeline(...)`` construction call for the
-                ASR model (e.g. ``{"chunk_length_s": 15}``). These affect how the
-                pipeline is built, so they are baked into the transcriber cache
-                key. None means "no extras". Default: None.
-            asr_generate_kwargs (Optional[dict]): Default decode-time keyword
-                arguments passed to the ASR model on every transcription (e.g.
-                ``{"language": "de", "task": "transcribe"}`` for a multilingual
-                Whisper). Applied at call time, so a single loaded pipeline can be
-                reused; per-request values (via ``mm_processor_kwargs``) override
-                these. Ignored by models that do not generate (e.g. CTC). Default:
-                None.
-            asr_max_audio_clips (int): Maximum number of audio clips accepted in a
-                single request. Each clip's transcript is spliced at its own
-                ``<|audio|>`` marker. vLLM enforces this as the modality ceiling
-                (``--limit-mm-per-prompt`` may lower it, not raise it). For the
-                cascade the clips cost no extra KV (transcripts are ordinary text
-                tokens bounded by the context window); the ceiling mainly guards
-                against one request triggering an unbounded number of synchronous
-                ASR transcriptions, and bounds the startup profiling pass. Default:
-                32.
-            asr_chunk_length_s (float): Window length (seconds) our own long-audio
-                chunker splits a clip into before transcribing each window. Only
-                used for backends that do not self-chunk (see asr_self_chunks); the
-                default Whisper backend chunks internally and ignores this. Default:
-                30.0.
-            asr_chunk_overlap_s (float): Overlap (seconds) between consecutive
-                chunker windows, so words straddling a boundary are whole in at
-                least one window; the transcript merge de-duplicates the overlap.
-                Only used when asr_self_chunks is False. Default: 5.0.
-            asr_self_chunks (bool): Whether the ASR backend handles long audio
-                itself. True for the Whisper pipeline (its internal
-                ``chunk_length_s`` does timestamp-based stitching, higher quality
-                than our text-level merge), so our chunker is bypassed. Set False
-                for a backend with a fixed input window (e.g. a future speech
-                encoder) to route audio through our encoder-agnostic
-                split/transcribe/merge chunker. Default: True.
+                vLLM's GPU KV-cache budget clean.
+            asr_dtype (Optional[str]): Precision the ASR weights load in, one of
+                ASR_DTYPES. None/"auto" derives it from asr_device (float16 on
+                CUDA). An encoder with BatchNorm layers must set "float32".
+                Default: None.
+            asr_pipeline_kwargs (Optional[dict]): Extra kwargs merged into the
+                ``transformers.pipeline(...)`` construction, e.g.
+                ``{"chunk_length_s": 15}``. Baked into the transcriber cache key.
+                Default: None.
+            asr_generate_kwargs (Optional[dict]): Default decode-time kwargs, e.g.
+                ``{"language": "de"}``. Applied per call, so one pipeline is
+                reused; per-request ``mm_processor_kwargs`` override them. Ignored
+                by non-generative backends. Default: None.
+            asr_max_audio_clips (int): Max audio clips per request. Bounds the
+                synchronous transcriptions one request can trigger and the startup
+                profiling pass; ``--limit-mm-per-prompt`` may lower it, not raise
+                it. Default: 32.
+            asr_chunk_length_s (float): Chunker window length in seconds. Only
+                used when asr_self_chunks is False. Default: 30.0.
+            asr_chunk_overlap_s (float): Overlap in seconds between chunker
+                windows, de-duplicated by the transcript merge. Only used when
+                asr_self_chunks is False. Default: 5.0.
+            asr_self_chunks (bool): True when the backend chunks long audio
+                itself (Whisper's timestamp stitching beats our text-level merge),
+                bypassing our chunker. False routes audio through the
+                split/transcribe/merge chunker instead. Default: True.
         **kwargs: Additional arguments passed to GraniteConfig.
     """
 
@@ -109,6 +94,7 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         asr_enabled: bool = False,
         asr_model_id: str | None = None,
         asr_device: str = "cpu",
+        asr_dtype: str | None = None,
         asr_pipeline_kwargs: dict | None = None,
         asr_generate_kwargs: dict | None = None,
         asr_max_audio_clips: int = 32,
@@ -195,22 +181,19 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         self.switch_head_dim = switch_head_dim
         self.fused_add_norm = fused_add_norm
 
-        # Audio (ASR) preprocessing parameters.
-        # The decoder is oblivious to audio: when enabled, the vLLM backend's
-        # multimodal preprocessor transcribes audio to text and injects the
-        # transcript tokens into the prompt before embedding. These fields make
-        # the checkpoint self-describing about its ASR front-end.
+        # Audio (ASR) preprocessing. The decoder is oblivious to audio; these
+        # fields make the checkpoint self-describing about its ASR front-end.
         self.asr_enabled = asr_enabled
         self.asr_model_id = asr_model_id
         self.asr_device = asr_device
-        # Pipeline-construction extras (affect the built pipeline → cache key)
-        # and default decode kwargs (applied per call, per-request overridable).
+        # Validated here so a typo fails at compose time, not in a vLLM worker.
+        if asr_dtype is not None and asr_dtype not in ASR_DTYPES:
+            raise ValueError(
+                f"asr_dtype must be one of {ASR_DTYPES} or None, got {asr_dtype!r}"
+            )
+        self.asr_dtype = asr_dtype
         self.asr_pipeline_kwargs = asr_pipeline_kwargs
         self.asr_generate_kwargs = asr_generate_kwargs
-        # Long-audio / multi-clip preprocessing. The transcript is spliced into
-        # the prompt as ordinary text tokens; a clip that makes the prompt exceed
-        # the context is rejected by vLLM's standard length check (no truncation).
-        # The chunker settings only apply to backends that do not self-chunk.
         if asr_max_audio_clips < 1:
             raise ValueError(
                 f"asr_max_audio_clips must be >= 1, got {asr_max_audio_clips}"
