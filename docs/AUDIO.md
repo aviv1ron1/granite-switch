@@ -183,6 +183,12 @@ Per request, before the scheduler allocates KV cache:
 3. A `PromptReplacement` swaps the `<|audio|>` marker for those transcript token
    ids. The scheduler then sizes KV for the **real** length — the audio "window"
    is variable and decided at runtime, not reserved in advance.
+   A clip with no recognizable speech in it — silence, music, noise, or a clip
+   too short to hold a word — transcribes to the empty string. Since every audio
+   item has to occupy at least one prompt position (vLLM discards a zero-length
+   placeholder and then rejects the request), those clips are replaced with a
+   single space instead: the model sees an audio turn that said nothing, rather
+   than an error.
 4. The model's `embed_multimodal` supplies embeddings for those positions. In the
    alpha that is simply the transcript's own token embeddings (identical to
    embedding them as text). **This is the seam the future encoder reuses:** swap

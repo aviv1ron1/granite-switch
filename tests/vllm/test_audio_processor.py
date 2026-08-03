@@ -350,13 +350,26 @@ def _make_processor_transcribing(info, monkeypatch, text, *, ids_for):
     return proc
 
 
+_BLANK_ID = 5
+
+
 class TestEmptyAndSilentClip:
-    """A silent clip transcribes to "" -> zero transcript tokens, marker elided."""
+    """Silence transcribes to "" -> stands in as _EMPTY_TRANSCRIPT_TEXT.
+
+    A zero-length replacement is not a legal placeholder: vLLM skips zero-length
+    content when locating placeholders and then rejects the request with
+    ``found 0 prompt placeholders``. So every clip must yield >=1 token, however
+    little was said in it.
+    """
 
     def _ids_for(self, text):
-        return [] if text == "" else [1, 2, 3]
+        if text == "":
+            return []
+        if text == proc_mod._EMPTY_TRANSCRIPT_TEXT:
+            return [_BLANK_ID]
+        return [1, 2, 3]
 
-    def test_empty_transcript_yields_zero_length_item(self, monkeypatch):
+    def test_empty_transcript_yields_blank_token(self, monkeypatch):
         import torch
 
         info = _make_info(asr_enabled=True, asr_model_id="w")
@@ -370,11 +383,39 @@ class TestEmptyAndSilentClip:
             mm_kwargs={},
             tok_kwargs={},
         )
-        assert bf["audio_num_tokens"].tolist() == [0]
-        assert len(bf["audio_token_ids"]) == 0
+        # One token, not zero — the item is still a findable placeholder.
+        assert bf["audio_num_tokens"].tolist() == [1]
+        assert bf["audio_token_ids"].tolist() == [_BLANK_ID]
         assert bf["audio_token_ids"].dtype == torch.long
 
-    def test_empty_clip_replacement_is_empty(self, monkeypatch):
+    def test_whitespace_only_transcript_also_falls_back(self, monkeypatch):
+        # transcribe() strips, so "" is the norm; a backend that does not strip
+        # must not slip a whitespace-only transcript past the check.
+        info = _make_info(asr_enabled=True, asr_model_id="w")
+        proc = _make_processor_transcribing(
+            info, monkeypatch, "   \n", ids_for=self._ids_for
+        )
+        assert proc._transcribe(np.zeros(1600, dtype=np.float32), {}) == [_BLANK_ID]
+
+    def test_untokenizable_fallback_raises_clearly(self, monkeypatch):
+        # If even the fallback encodes to nothing, fail with our message rather
+        # than vLLM's opaque placeholder-count error.
+        info = _make_info(asr_enabled=True, asr_model_id="w")
+        proc = _make_processor_transcribing(
+            info, monkeypatch, "", ids_for=lambda text: []
+        )
+        with pytest.raises(ValueError, match="no tokens"):
+            proc._transcribe(np.zeros(1600, dtype=np.float32), {})
+
+    def test_nonempty_transcript_untouched(self, monkeypatch):
+        # The fallback must not perturb a clip that did contain speech.
+        info = _make_info(asr_enabled=True, asr_model_id="w")
+        proc = _make_processor_transcribing(
+            info, monkeypatch, "words", ids_for=self._ids_for
+        )
+        assert proc._transcribe(np.zeros(1600, dtype=np.float32), {}) == [1, 2, 3]
+
+    def test_blank_clip_replacement_is_not_empty(self, monkeypatch):
         info = _make_info(asr_enabled=True, asr_model_id="w")
         proc = _make_processor_transcribing(
             info, monkeypatch, "", ids_for=self._ids_for
@@ -391,15 +432,15 @@ class TestEmptyAndSilentClip:
 
         out = _Kwargs(
             {
-                "audio_num_tokens": torch.tensor([0], dtype=torch.long),
-                "audio_token_ids": torch.zeros(0, dtype=torch.long),
+                "audio_num_tokens": torch.tensor([1], dtype=torch.long),
+                "audio_token_ids": torch.tensor([_BLANK_ID], dtype=torch.long),
             }
         )
         updates = proc._get_prompt_updates(None, {}, out)
         assert len(updates) == 1
-        assert updates[0].replacement(0) == []
+        assert updates[0].replacement(0) == [_BLANK_ID]
 
-    def test_mixed_empty_and_nonempty_clips(self, monkeypatch):
+    def test_mixed_blank_and_nonempty_clips(self, monkeypatch):
         info = _make_info(asr_enabled=True, asr_max_audio_clips=4, asr_model_id="w")
         texts = iter(["", "words"])
         info.get_tokenizer = lambda: SimpleNamespace(
@@ -431,8 +472,166 @@ class TestEmptyAndSilentClip:
             mm_kwargs={},
             tok_kwargs={},
         )
-        assert bf["audio_num_tokens"].tolist() == [0, 3]
-        assert len(bf["audio_token_ids"]) == 3
+        # The silent clip contributes 1 token instead of 0, so both items keep a
+        # distinct, non-empty span and neither gets dropped.
+        assert bf["audio_num_tokens"].tolist() == [1, 3]
+        assert bf["audio_token_ids"].tolist() == [_BLANK_ID, 1, 2, 3]
+
+
+_MARKER_ID = 99
+_TRANSCRIPT_IDS = [7, 8]
+
+
+class _MarkerTokenizer:
+    """Marker is one special id, the transcript two; anything else is per-char.
+
+    A class, not a SimpleNamespace: vLLM's ``_seq2tokens`` goes through an
+    ``lru_cache`` keyed on the tokenizer, so it has to be hashable.
+    """
+
+    def encode(self, text, add_special_tokens=False):
+        if text == "hello world":
+            return list(_TRANSCRIPT_IDS)
+        # Split on the marker the way a fast tokenizer splits on a registered
+        # special token; everything else is one id per character.
+        ids = []
+        for i, part in enumerate(text.split(proc_mod.AUDIO_MARKER)):
+            if i:
+                ids.append(_MARKER_ID)
+            ids.extend(ord(c) for c in part)
+        return ids
+
+    def decode(self, ids):
+        return "".join(
+            proc_mod.AUDIO_MARKER if i == _MARKER_ID else chr(i) for i in ids
+        )
+
+
+class TestPromptUpdatesAreApplied:
+    """The marker must actually become transcript ids on the *uncached* path.
+
+    ``_hf_processor_applies_updates`` is vLLM's "did you expand the placeholder
+    yourself?" hook. We do not — we leave ``<|audio|>`` in the prompt and return
+    the transcript out of band — so it must report False or vLLM skips our
+    ``PromptReplacement`` and then fails to find the transcript it was promised.
+
+    Only the uncached path (``--mm-processor-cache-gb 0``) consults the hook, so
+    the default cache setting hid this. These tests drive vLLM's real
+    ``_apply_hf_processor_text_mm`` / ``_maybe_apply_prompt_updates`` rather than
+    asserting on the override in isolation.
+    """
+
+    def _audio_items(self, count=1):
+        from vllm.multimodal.parse import AudioProcessorItems, MultiModalDataItems
+
+        clips = [np.zeros(1600, dtype=np.float32) for _ in range(count)]
+        return MultiModalDataItems({"audio": AudioProcessorItems(clips)})
+
+    def _proc(self, monkeypatch, count=1, text="hello world"):
+        info = _make_info(asr_enabled=True, asr_model_id="w")
+        proc = _make_processor_transcribing(
+            info, monkeypatch, text, ids_for=lambda t: [7, 8]
+        )
+        # ids_for is unused: the marker tokenizer does the encoding, so the
+        # transcript text maps to ids the same way the real path would.
+        tokenizer = _MarkerTokenizer()
+        info.get_tokenizer = lambda: tokenizer
+        return proc, self._audio_items(count)
+
+    def test_hook_reports_updates_not_applied(self, monkeypatch):
+        proc, items = self._proc(monkeypatch)
+        assert (
+            proc._hf_processor_applies_updates(
+                prompt_text=proc_mod.AUDIO_MARKER,
+                mm_items=items,
+                hf_processor_mm_kwargs={},
+                tokenization_kwargs={},
+            )
+            is False
+        )
+
+    def test_uncached_path_reports_updates_not_applied(self, monkeypatch):
+        # Real vLLM code: this is the call site that decides whether the
+        # replacement runs (processing/processor.py, _apply_hf_processor_text_mm).
+        proc, items = self._proc(monkeypatch)
+        prompt_ids, _, is_update_applied = proc._apply_hf_processor_text_mm(
+            prompt_text=proc_mod.AUDIO_MARKER,
+            mm_items=items,
+            hf_processor_mm_kwargs={},
+            tokenization_kwargs={},
+        )
+        # Marker still un-expanded, hence False.
+        assert prompt_ids == [_MARKER_ID]
+        assert is_update_applied is False
+
+    def _apply_uncached(self, proc, items, prompt_text):
+        """vLLM's ``apply()`` with cache=None, minus the hashing/cache plumbing."""
+        from vllm.multimodal.inputs import MultiModalKwargsItems
+
+        prompt_ids, processed, is_update_applied = proc._apply_hf_processor_text_mm(
+            prompt_text=prompt_text,
+            mm_items=items,
+            hf_processor_mm_kwargs={},
+            tokenization_kwargs={},
+        )
+        mm_kwargs = MultiModalKwargsItems.from_hf_inputs(
+            processed, proc._get_mm_fields_config(processed, {})
+        )
+        updates = proc._get_mm_prompt_updates(items, {}, mm_kwargs)
+        return proc._maybe_apply_prompt_updates(
+            mm_items=items,
+            prompt_ids=prompt_ids,
+            mm_kwargs=mm_kwargs,
+            mm_prompt_updates=updates,
+            is_update_applied=is_update_applied,
+        )
+
+    def test_marker_becomes_transcript_ids(self, monkeypatch):
+        proc, items = self._proc(monkeypatch)
+        new_ids, placeholders = self._apply_uncached(proc, items, proc_mod.AUDIO_MARKER)
+        # Marker replaced, not merely searched for.
+        assert new_ids == _TRANSCRIPT_IDS
+        assert _MARKER_ID not in new_ids
+        # And the placeholder range points at the transcript.
+        (ph,) = placeholders["audio"]
+        assert (ph.start_idx, ph.length) == (0, len(_TRANSCRIPT_IDS))
+
+    def test_transcript_spliced_between_surrounding_text(self, monkeypatch):
+        proc, items = self._proc(monkeypatch)
+        prompt = proc_mod.AUDIO_MARKER + "Q"
+        new_ids, placeholders = self._apply_uncached(proc, items, prompt)
+        assert new_ids == [*_TRANSCRIPT_IDS, ord("Q")]
+        (ph,) = placeholders["audio"]
+        assert (ph.start_idx, ph.length) == (0, len(_TRANSCRIPT_IDS))
+
+    def test_silent_clip_still_yields_a_placeholder(self, monkeypatch):
+        # The other half of the same invariant: a clip with no speech in it used
+        # to produce a zero-length replacement, which vLLM discards and then
+        # rejects the request over. The fallback text keeps the span findable.
+        proc, items = self._proc(monkeypatch, text="")
+        new_ids, placeholders = self._apply_uncached(proc, items, proc_mod.AUDIO_MARKER)
+        assert new_ids == [ord(proc_mod._EMPTY_TRANSCRIPT_TEXT)]
+        (ph,) = placeholders["audio"]
+        assert (ph.start_idx, ph.length) == (0, 1)
+
+    def test_silent_clip_among_speech_clips(self, monkeypatch):
+        proc, items = self._proc(monkeypatch, count=2, text="")
+        new_ids, placeholders = self._apply_uncached(
+            proc, items, proc_mod.AUDIO_MARKER * 2
+        )
+        assert new_ids == [ord(proc_mod._EMPTY_TRANSCRIPT_TEXT)] * 2
+        # Both items keep their own placeholder; neither collapses into the other.
+        assert len(placeholders["audio"]) == 2
+        assert [p.length for p in placeholders["audio"]] == [1, 1]
+
+    def test_two_clips_each_get_their_own_placeholder(self, monkeypatch):
+        proc, items = self._proc(monkeypatch, count=2)
+        new_ids, placeholders = self._apply_uncached(
+            proc, items, proc_mod.AUDIO_MARKER * 2
+        )
+        assert new_ids == _TRANSCRIPT_IDS * 2
+        # One placeholder per audio item, or _validate_mm_placeholders raises.
+        assert len(placeholders["audio"]) == 2
 
 
 class TestClipCeiling:
