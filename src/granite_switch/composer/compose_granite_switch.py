@@ -67,6 +67,7 @@ from granite_switch.composer.tokenizer_setup import (
     configure_chat_template,
     get_alora_first_invocation_token_id,
 )
+from granite_switch.composer.validator import validate_control_lut
 from granite_switch.config import ASR_DTYPES
 
 # ---------------------------------------------------------------------------
@@ -871,7 +872,14 @@ def build():
         or args.asr_chunk_length_s is not None
         or args.asr_chunk_overlap_s is not None
     )
-    audio_token_id = add_audio_token(tokenizer) if audio_enabled else None
+    # The control tokens are re-passed so this call doesn't drop them from the
+    # tokenizer's additional-special-tokens list (add_special_tokens replaces
+    # that list rather than extending it).
+    audio_token_id = (
+        add_audio_token(tokenizer, keep_special_tokens=special_tokens)
+        if audio_enabled
+        else None
+    )
 
     # Configure chat template with adapter mappings (Granite models only).
     # Non-Granite models preserve the upstream template verbatim because
@@ -1010,6 +1018,23 @@ def build():
     model.resize_token_embeddings(new_vocab_size)
     new_embed_size = model.model.embed_tokens.weight.shape[0]
     print(f"Embeddings resized: {old_embed_size} -> {new_embed_size}")
+
+    # The switch sized its control->substitute table from the pre-resize
+    # config.vocab_size (copied from the base model), so the resize above leaves
+    # it short of the config this checkpoint will ship with. Re-derive it, then
+    # assert the two agree — see validate_control_lut for why a mismatch is not
+    # something the loader can recover from.
+    switch = getattr(model.model, "switch", None)
+    if switch is not None:
+        lut = getattr(switch, "control_to_substitute_lut", None)
+        if lut is not None and lut.numel() != model.config.vocab_size:
+            old_lut_size = lut.numel()
+            switch.rebuild_control_to_substitute_lut(model.config)
+            print(
+                "Switch control LUT rebuilt: "
+                f"{old_lut_size} -> {switch.control_to_substitute_lut.numel()}"
+            )
+    validate_control_lut(model)
 
     print(f"\nStep 3 complete in {time.time() - step_start:.2f}s")
 

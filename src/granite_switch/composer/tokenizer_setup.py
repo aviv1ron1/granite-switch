@@ -94,7 +94,11 @@ def add_control_tokens(
     return adapter_token_ids, special_tokens
 
 
-def add_audio_token(tokenizer, marker: str = "<|audio|>") -> int:
+def add_audio_token(
+    tokenizer,
+    marker: str = "<|audio|>",
+    keep_special_tokens: list[str] | None = None,
+) -> int:
     """Add the audio placeholder marker token to the tokenizer.
 
     Used for the audio cascade: this single special token is placed in the
@@ -102,13 +106,26 @@ def add_audio_token(tokenizer, marker: str = "<|audio|>") -> int:
     request time (see granite_switch.vllm.audio). Registering it as one special
     token keeps the processor's prompt-replacement match clean.
 
+    ``keep_special_tokens`` must list every token an earlier
+    ``add_special_tokens({"additional_special_tokens": ...})`` call registered —
+    in practice the adapter control tokens from :func:`add_control_tokens`.
+    That call *replaces* the additional-special-tokens list instead of appending
+    to it, and transformers exposes no way to read the current list back, so any
+    token not re-passed here silently drops out of ``all_special_tokens`` and
+    out of the saved ``tokenizer_config.json``. Re-passing an already-added
+    token is free: it keeps its id and does not grow the vocabulary.
+
     Must be called before the model's embedding resize so the new row is sized
     in. Returns the marker's token id.
     """
     print(f"\nAdding audio marker token: {marker}")
-    tokenizer.add_special_tokens({"additional_special_tokens": [marker]})
+    # Marker last so it takes the next free id and the kept tokens keep theirs.
+    kept = [t for t in (keep_special_tokens or []) if t != marker]
+    tokenizer.add_special_tokens({"additional_special_tokens": [*kept, marker]})
     token_id = tokenizer.convert_tokens_to_ids(marker)
     print(f"  {marker}: {token_id}")
+    if kept:
+        print(f"  (preserved {len(kept)} existing special token(s))")
     return token_id
 
 
