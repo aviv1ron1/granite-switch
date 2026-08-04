@@ -62,7 +62,7 @@ class GraniteSwitchComposer:
         from granite_switch.config import GraniteSwitchConfig
         from granite_switch.hf.modeling_granite_switch import GraniteSwitchForCausalLM
 
-        from .arch import load_base_config
+        from .arch import get_base_declared_keys, load_base_config
 
         if adapter_paths is None:
             adapter_paths = []
@@ -76,6 +76,7 @@ class GraniteSwitchComposer:
         # --- Step 1: Resolve architecture ---
         print(f"Loading config from {base_model_name_or_path}...")
         base_config = load_base_config(base_model_name_or_path)
+        base_declared_keys = get_base_declared_keys(base_model_name_or_path)
         arch = resolve_arch(base_model_name_or_path, base_config=base_config)
 
         # --- Step 2–3: Detect LoRA config and present modules ---
@@ -161,6 +162,7 @@ class GraniteSwitchComposer:
                 "max_lora_rank": lora_rank,
                 "adapter_ranks": adapter_ranks,
                 "lora_target_modules": lora_target_modules,
+                "base_declared_keys": base_declared_keys,
             }
         )
 

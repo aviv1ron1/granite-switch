@@ -3,6 +3,33 @@
 
 from transformers import GraniteMoeHybridConfig
 
+# Keys that GraniteMoeHybridConfig materializes with hardcoded class-level defaults
+# (it is a @strict dataclass, so every field is always set) but that the attention-only
+# GraniteSwitch model never reads. Left unfiltered they pollute every composed config.json
+# with state-space (mamba/time_step) and MoE-routing parameters the base never declared.
+# to_dict() drops any of these that the base model's raw config.json did not itself declare.
+# NOTE: num_local_experts, position_embedding_type, and shared_intermediate_size are
+# deliberately absent here — the model reads them at load time, so they must always serialize.
+_LEAKY_INHERITED_KEYS = frozenset(
+    {
+        "mamba_n_heads",
+        "mamba_n_groups",
+        "mamba_d_state",
+        "mamba_d_head",
+        "mamba_d_conv",
+        "mamba_expand",
+        "mamba_chunk_size",
+        "mamba_conv_bias",
+        "mamba_proj_bias",
+        "time_step_min",
+        "time_step_max",
+        "time_step_limit",
+        "num_experts_per_tok",
+        "output_router_logits",
+        "router_aux_loss_coef",
+    }
+)
+
 
 class GraniteSwitchConfig(GraniteMoeHybridConfig):
     """Configuration class for GraniteSwitch model.
@@ -60,6 +87,9 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
         num_local_experts: int = 0,
         position_embedding_type: str = "rope",
         layer_types: list[str] | None = None,
+        # Keys the base model's raw config.json declared. Used by to_dict() to decide
+        # which otherwise-leaky inherited parent defaults to keep vs. strip.
+        base_declared_keys: list[str] | None = None,
         **kwargs,
     ):
         # Compute default layer_types before parent init.
@@ -76,6 +106,11 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
             layer_types=layer_types,
             **kwargs,
         )
+
+        # Serialized so the leaky-key filter in to_dict() stays stable across
+        # save -> load -> save: once the leaky keys are stripped, this list is the
+        # only surviving record of what the base actually declared.
+        self.base_declared_keys = list(base_declared_keys) if base_declared_keys else []
 
         # Default shared_intermediate_size from intermediate_size.
         # All Granite 4 models use shared_mlp naming; for dense models
@@ -194,3 +229,20 @@ class GraniteSwitchConfig(GraniteMoeHybridConfig):
                 )
 
         self.lora_target_modules = lora_target_modules
+
+    def to_dict(self) -> dict:
+        """Serialize config, dropping inherited parent defaults the base never declared.
+
+        GraniteMoeHybridConfig is a @strict dataclass, so state-space (mamba/time_step)
+        and MoE-routing fields always materialize with class-level defaults even for a
+        dense, attention-only base. The GraniteSwitch model never reads them, so they are
+        pruned unless the base model's raw config.json actually declared them (tracked via
+        ``base_declared_keys``). save_pretrained() routes through to_diff_dict() -> to_dict(),
+        so this filtering reaches disk.
+        """
+        output = super().to_dict()
+        keep = set(self.base_declared_keys)
+        for key in _LEAKY_INHERITED_KEYS:
+            if key not in keep:
+                output.pop(key, None)
+        return output
