@@ -393,3 +393,19 @@ def load_base_config(model_name_or_path: str):
     from transformers import AutoConfig as _AC
 
     return _AC.from_pretrained(model_name_or_path)
+
+
+def get_base_declared_keys(model_name_or_path: str) -> list[str]:
+    """Return the keys literally present in the base model's raw ``config.json``.
+
+    A loaded ``PretrainedConfig`` cannot tell us which keys the file declared vs. which
+    were filled by class-level defaults (``@strict`` dataclasses materialize every field).
+    ``get_config_dict`` returns the raw file contents, preserving that provenance so
+    ``GraniteSwitchConfig.to_dict()`` can keep only the state-space/MoE keys the base
+    actually declared. For hub IDs this reads from the same cache ``load_base_config``
+    already populated; no writes.
+    """
+    from transformers import PretrainedConfig
+
+    raw, _ = PretrainedConfig.get_config_dict(model_name_or_path)
+    return list(raw.keys())

@@ -7,7 +7,15 @@ fields that survived the legacy-hiding removal.
 
 import pytest
 
-from granite_switch.config import GraniteSwitchConfig
+from granite_switch.config import _LEAKY_INHERITED_KEYS, GraniteSwitchConfig
+
+# Keys the GraniteSwitch model reads at load time. They resemble the leaky inherited
+# defaults but must ALWAYS serialize, so they must never be in the leaky set.
+_LOAD_BEARING_KEYS = (
+    "num_local_experts",
+    "position_embedding_type",
+    "shared_intermediate_size",
+)
 
 # ── Helper ────────────────────────────────────────────────────────────
 
@@ -93,3 +101,47 @@ class TestConfigDefaults:
     def test_projection_head_dim_inferred_from_hidden_size(self):
         cfg = GraniteSwitchConfig(**_valid_kwargs())
         assert cfg.projection_head_dim == 64 // 4
+
+
+# ════════════════════════════════════════════════════════════════════
+# 3. Serialization: inherited-default keys the base never declared are pruned
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestLeakyKeyFiltering:
+    def test_leaky_keys_stripped_when_base_declared_none(self):
+        """A dense/attention-only base declares no mamba/MoE keys -> none serialize."""
+        cfg = GraniteSwitchConfig(**_valid_kwargs())
+        out = cfg.to_dict()
+        present = _LEAKY_INHERITED_KEYS & out.keys()
+        assert present == set(), (
+            f"leaky keys should be stripped, found: {sorted(present)}"
+        )
+
+    def test_base_declared_leaky_key_is_kept(self):
+        """A key the base actually declared (e.g. a genuine hybrid) is preserved."""
+        cfg = GraniteSwitchConfig(**_valid_kwargs(base_declared_keys=["mamba_d_state"]))
+        out = cfg.to_dict()
+        assert "mamba_d_state" in out
+        others = (_LEAKY_INHERITED_KEYS - {"mamba_d_state"}) & out.keys()
+        assert others == set(), (
+            f"other leaky keys should be stripped, found: {sorted(others)}"
+        )
+
+    def test_load_bearing_keys_always_present(self):
+        """Keys the model reads at load time must survive filtering in every case."""
+        for kwargs in (
+            _valid_kwargs(),
+            _valid_kwargs(base_declared_keys=["mamba_d_state"]),
+        ):
+            out = GraniteSwitchConfig(**kwargs).to_dict()
+            for key in _LOAD_BEARING_KEYS:
+                assert key in out, f"{key} must always serialize"
+                assert key not in _LEAKY_INHERITED_KEYS
+
+    def test_round_trip_stable(self):
+        """save -> load -> save reproduces identical serialization (allow-set persists)."""
+        cfg = GraniteSwitchConfig(**_valid_kwargs(base_declared_keys=["mamba_d_state"]))
+        first = cfg.to_dict()
+        reloaded = GraniteSwitchConfig.from_dict(first)
+        assert reloaded.to_dict() == first
