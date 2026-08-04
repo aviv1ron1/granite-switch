@@ -15,10 +15,10 @@ import pytest
 
 _VLLM_AVAILABLE = importlib.util.find_spec("vllm") is not None
 
-pytestmark = pytest.mark.skipif(
-    not _VLLM_AVAILABLE,
-    reason="requires vLLM installed",
-)
+pytestmark = [
+    pytest.mark.audio,
+    pytest.mark.skipif(not _VLLM_AVAILABLE, reason="requires vLLM installed"),
+]
 
 if _VLLM_AVAILABLE:
     from granite_switch.vllm.audio import processor as proc_mod

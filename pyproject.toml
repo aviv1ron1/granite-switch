@@ -53,6 +53,7 @@ markers = [
     "slow: takes > 30s",
     "deep: expensive code-theory tests (m=8 / 256-dim); run with: pytest -m deep",
     "requires_model: needs a real model checkpoint",
+    "audio: exercises the audio/ASR path; run with: pytest -m audio",
 ]
 
 [dependency-groups]

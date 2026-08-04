@@ -242,6 +242,17 @@ adapter behaves identically to the text equivalent.
 
 ## Tests
 
+Everything on the audio path carries the `audio` marker, so the whole tier selects
+in one command regardless of where the tests live:
+
+```bash
+# All audio tests (13 of them need a GPU and a real checkpoint)
+pytest -m audio -v -s --tb=short
+
+# CPU tier only — runs in a few seconds
+pytest -m "audio and not gpu" -v -s --tb=short
+```
+
 - `tests/unit/test_asr.py` — CPU unit tests for the ASR backend (audio coercion,
   resampling, transcription with a mocked pipeline, pipeline-kwargs cache keying,
   and per-request decode-kwargs resolution). No GPU/vLLM required.

@@ -21,7 +21,12 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [pytest.mark.slow, pytest.mark.requires_model, pytest.mark.gpu]
+pytestmark = [
+    pytest.mark.audio,
+    pytest.mark.slow,
+    pytest.mark.requires_model,
+    pytest.mark.gpu,
+]
 
 if importlib.util.find_spec("vllm") is None:
     pytest.skip("requires vLLM installed", allow_module_level=True)

@@ -100,6 +100,7 @@ class TestConfigDefaults:
 # ════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.audio
 class TestAudioConfig:
     def test_asr_defaults_off(self):
         cfg = GraniteSwitchConfig(num_adapters=0)
