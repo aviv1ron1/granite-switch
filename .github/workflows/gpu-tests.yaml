@@ -49,12 +49,16 @@ on:
       # no rebuild. It is equally trusted either way: gpu_test_command.sh dispatches
       # with --ref <default branch>, so this file always comes from main and a pull
       # request cannot alter its own test scope.
+      # THE list of test families. gpu_test_command.sh derives the suite name from
+      # the comment (/gpu-test-<x> -> x) and reads this line to validate it, so a new
+      # family is added HERE and nowhere else -- this entry plus its arm in the
+      # Resolve test scope step below.
       suite:
-        description: "Which tests to run: full (all five suites), short (vllm + integration), dev (one fast GPU file)."
+        description: "Which tests to run: full (all five suites), short (vllm + integration), dev (one fast GPU file), audio (the audio/ASR marker)."
         required: false
         default: full
         type: choice
-        options: [full, short, dev]
+        options: [full, short, dev, audio]
 
 # Per-SHA-and-suite concurrency: re-dispatching the same commit with the same scope
 # cancels its stale run. Different PRs (different SHAs) may run in parallel; excess
@@ -165,11 +169,30 @@ jobs:
               SUFFIX="dev"
               LEG="$LABEL-dev"
               ;;
+            # The audio/ASR family, selected by MARKER rather than by path: the
+            # `audio` mark spans 8 files across unit, composer, vllm and integration,
+            # so a path list would be long and would drift silently every time a
+            # marked test is added. A marker cannot drift.
+            #
+            # "and not deep" is not optional. pytest's -m is single-valued and the
+            # command line REPLACES pyproject's addopts `-m "not deep"` rather than
+            # adding to it, so a bare `-m audio` would quietly start running the
+            # expensive deep audio tests that every other scope excludes.
+            #
+            # The quotes survive sed -> YAML -> helm -> the pod's shell; the
+            # neighbouring `python -c "..."` lines in the job template rely on the
+            # same thing. The one forbidden character is #, the sed delimiter.
+            audio)
+              PATHS='-m "audio and not deep" tests/'
+              SUFFIX="audio"
+              LEG="$LABEL-audio"
+              ;;
             # Fail rather than defaulting to full: silently running the wrong scope
             # is worse than not running, and `type: choice` already rejects unknown
-            # values, so reaching this means something changed upstream.
+            # values, so reaching this means the options list above gained an entry
+            # without an arm here.
             *)
-              echo "::error::unknown suite '$SUITE' — expected full, short or dev"
+              echo "::error::unknown suite '$SUITE' — no mapping arm for it"
               exit 1
               ;;
           esac

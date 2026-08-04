@@ -49,6 +49,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SCRIPT_DIR: ${{ github.workspace }}/.github/scripts
+          # The test families live in this file's `suite` input and nowhere else.
+          # The handler reads them out of it to validate the command and to build
+          # its decline message, so adding a family is a one-file change there.
+          WORKFLOW_FILE: ${{ github.workspace }}/.github/workflows/gpu-tests.yaml
           # GitHub-controlled values pass through env, never interpolated into the
           # script body — prevents shell injection via a crafted login.
           ACTOR: ${{ github.event.comment.user.login }}
