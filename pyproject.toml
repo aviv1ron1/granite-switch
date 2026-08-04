@@ -58,8 +58,11 @@ markers = [
 [dependency-groups]
 vllm19     = ["vllm>=0.19.1,<0.20.0"]
 vllm20     = ["vllm>=0.20.0,<0.21.0"]
-dev        = ["pytest", "pytest-cov", { include-group = "vllm19" }, "granite-switch[hf,compose]"]
-dev-vllm20 = ["pytest", "pytest-cov", { include-group = "vllm20" }, "granite-switch[hf,compose]"]
+# `audio` is included so the audio tests can actually run: the ASR path needs
+# soundfile/librosa at runtime, and no group pulled them in before (integration
+# tests failed with ModuleNotFoundError on a synced pod).
+dev        = ["pytest", "pytest-cov", { include-group = "vllm19" }, "granite-switch[hf,compose,audio]"]
+dev-vllm20 = ["pytest", "pytest-cov", { include-group = "vllm20" }, "granite-switch[hf,compose,audio]"]
 test       = ["pytest", "pytest-cov", "bitsandbytes", "optimum-quanto", { include-group = "dev" }]
 
 [tool.uv]

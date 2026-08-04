@@ -9,6 +9,22 @@ intentionally simple and requires no training. The "proper" upgrade (feeding a
 trained projection of a speech encoder's embeddings straight into the LLM) reuses
 the same hooks — see [Design](#design) below.
 
+## Installing
+
+The audio path needs `soundfile` and `librosa` on top of the vLLM backend — they
+decode and resample the incoming waveform. They live in the `audio` extra, which is
+**not** part of `vllm`, so a plain `uv sync --extra vllm` gives you a checkpoint that
+fails on any non-16 kHz input:
+
+```bash
+# Serving an audio-enabled checkpoint
+uv sync --extra vllm --extra audio     # or --extra vllm20 --extra audio
+
+# Development / running the test suite (the dev groups include audio already)
+uv sync --group dev                    # vLLM 0.19.x
+uv sync --group dev-vllm20             # vLLM 0.20.x
+```
+
 ## Building an audio-enabled checkpoint
 
 Add `--enable-audio` when composing:

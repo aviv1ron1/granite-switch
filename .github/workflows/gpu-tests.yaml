@@ -16,7 +16,10 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --frozen --group dev --extra hf --extra vllm --extra compose
+      # `--extra audio` is redundant with the dev group (which now includes it) but
+      # stated explicitly: the audio tests need soundfile/librosa at runtime, and a
+      # group refactor should not silently drop them again.
+      - run: uv sync --frozen --group dev --extra hf --extra vllm --extra compose --extra audio
 
       - name: Run GPU tests
         run: |
