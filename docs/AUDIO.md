@@ -9,6 +9,22 @@ intentionally simple and requires no training. The "proper" upgrade (feeding a
 trained projection of a speech encoder's embeddings straight into the LLM) reuses
 the same hooks — see [Design](#design) below.
 
+## Installing
+
+The audio path needs `soundfile` and `librosa` on top of the vLLM backend — they
+decode and resample the incoming waveform. They live in the `audio` extra, which is
+**not** part of `vllm`, so a plain `uv sync --extra vllm` gives you a checkpoint that
+fails on any non-16 kHz input:
+
+```bash
+# Serving an audio-enabled checkpoint
+uv sync --extra vllm --extra audio     # or --extra vllm20 --extra audio
+
+# Development / running the test suite (the dev groups include audio already)
+uv sync --group dev                    # vLLM 0.19.x
+uv sync --group dev-vllm20             # vLLM 0.20.x
+```
+
 ## Building an audio-enabled checkpoint
 
 Add `--enable-audio` when composing:
@@ -183,6 +199,12 @@ Per request, before the scheduler allocates KV cache:
 3. A `PromptReplacement` swaps the `<|audio|>` marker for those transcript token
    ids. The scheduler then sizes KV for the **real** length — the audio "window"
    is variable and decided at runtime, not reserved in advance.
+   A clip with no recognizable speech in it — silence, music, noise, or a clip
+   too short to hold a word — transcribes to the empty string. Since every audio
+   item has to occupy at least one prompt position (vLLM discards a zero-length
+   placeholder and then rejects the request), those clips are replaced with a
+   single space instead: the model sees an audio turn that said nothing, rather
+   than an error.
 4. The model's `embed_multimodal` supplies embeddings for those positions. In the
    alpha that is simply the transcript's own token embeddings (identical to
    embedding them as text). **This is the seam the future encoder reuses:** swap
@@ -219,6 +241,17 @@ tokens as usual, and `embed_input_ids` applies the same token-exchange rewrite
 adapter behaves identically to the text equivalent.
 
 ## Tests
+
+Everything on the audio path carries the `audio` marker, so the whole tier selects
+in one command regardless of where the tests live:
+
+```bash
+# All audio tests (13 of them need a GPU and a real checkpoint)
+pytest -m audio -v -s --tb=short
+
+# CPU tier only — runs in a few seconds
+pytest -m "audio and not gpu" -v -s --tb=short
+```
 
 - `tests/unit/test_asr.py` — CPU unit tests for the ASR backend (audio coercion,
   resampling, transcription with a mocked pipeline, pipeline-kwargs cache keying,

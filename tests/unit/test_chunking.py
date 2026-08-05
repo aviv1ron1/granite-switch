@@ -19,6 +19,8 @@ _spec = importlib.util.spec_from_file_location("gs_chunking_under_test", _CHUNKI
 chunking = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(chunking)
 
+pytestmark = pytest.mark.audio
+
 
 SR = 16_000
 

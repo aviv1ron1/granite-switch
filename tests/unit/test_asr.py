@@ -23,6 +23,8 @@ _spec = importlib.util.spec_from_file_location("gs_asr_under_test", _ASR_PATH)
 asr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(asr)
 
+pytestmark = pytest.mark.audio
+
 
 class TestCoerceAudio:
     def test_array_plus_rate(self):

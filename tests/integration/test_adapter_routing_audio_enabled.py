@@ -16,7 +16,12 @@ import os
 
 import pytest
 
-pytestmark = [pytest.mark.slow, pytest.mark.requires_model, pytest.mark.gpu]
+pytestmark = [
+    pytest.mark.audio,
+    pytest.mark.slow,
+    pytest.mark.requires_model,
+    pytest.mark.gpu,
+]
 
 if importlib.util.find_spec("granite_switch.hf") is None:
     pytest.skip("requires the HF backend ([hf] extra)", allow_module_level=True)

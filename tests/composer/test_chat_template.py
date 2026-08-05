@@ -555,6 +555,7 @@ def _audio_messages(text="transcribe this", audio_type="audio"):
     ]
 
 
+@pytest.mark.audio
 class TestAudioChatTemplate:
     """configure_audio_chat_template emits the <|audio|> marker for audio parts."""
 
@@ -606,6 +607,7 @@ class TestAudioChatTemplate:
         assert tokenizer.chat_template is None
 
 
+@pytest.mark.audio
 class TestAudioAndAdapterInjectionsCompose:
     """Adapter and audio injections applied in sequence leave both intact."""
 

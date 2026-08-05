@@ -42,6 +42,10 @@ from .asr import (
 
 AUDIO_MARKER = "<|audio|>"
 _TARGET_SR = 16_000
+# Stands in for a transcript with no speech in it. Must tokenize to at least one
+# token: vLLM discards a zero-length placeholder and then reports the item as
+# missing, so every audio item has to contribute something to the prompt.
+_EMPTY_TRANSCRIPT_TEXT = " "
 # Keeps the transcript budget finite if max_model_len cannot be read.
 _FALLBACK_CONTEXT_LEN = 8192
 _DUMMY_AUDIO_SECONDS = 5
@@ -159,7 +163,14 @@ class GraniteSwitchASRMultiModalProcessor(
         generate_kwargs: Mapping[str, object] | None = None,
     ) -> list[int]:
         """Transcribe one audio item to token ids. Never truncated here — an
-        oversized prompt is rejected by vLLM's own length check."""
+        oversized prompt is rejected by vLLM's own length check.
+
+        Guaranteed non-empty: silence, music, non-speech or a clip too short to
+        contain a word all transcribe to ``""``, and a zero-length replacement
+        would make vLLM drop the placeholder and reject the request. Those clips
+        get :data:`_EMPTY_TRANSCRIPT_TEXT` instead, so the model sees an audio
+        turn that simply said nothing.
+        """
         transcriber = get_transcriber(
             model_id=self.info._asr_model_id(),
             device=self.info._asr_device(),
@@ -176,7 +187,19 @@ class GraniteSwitchASRMultiModalProcessor(
             chunk_overlap_s=self.info._asr_chunk_overlap_s(),
         )
         tokenizer = self.info.get_tokenizer()
-        return tokenizer.encode(text, add_special_tokens=False)
+        if not text or not text.strip():
+            text = _EMPTY_TRANSCRIPT_TEXT
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        if not ids:
+            # Only reachable if the tokenizer drops _EMPTY_TRANSCRIPT_TEXT
+            # entirely. Fail loudly rather than emit a zero-length placeholder,
+            # which surfaces as an opaque "found 0 prompt placeholders".
+            raise ValueError(
+                f"Tokenizer produced no tokens for {text!r}; cannot build a "
+                "prompt placeholder for this audio item. Choose an "
+                "_EMPTY_TRANSCRIPT_TEXT this tokenizer encodes to >=1 token."
+            )
+        return ids
 
     def _call_hf_processor(
         self,
@@ -214,6 +237,31 @@ class GraniteSwitchASRMultiModalProcessor(
             ),
             tensor_type="pt",
         )
+
+    def _hf_processor_applies_updates(
+        self,
+        prompt_text: str,
+        mm_items: MultiModalDataItems,
+        hf_processor_mm_kwargs: Mapping[str, object],
+        tokenization_kwargs: Mapping[str, object],
+    ) -> bool:
+        """Always False: ``_call_hf_processor`` leaves the marker in place.
+
+        The base implementation returns True for raw (non-embedding) items,
+        which tells vLLM the processor already expanded the placeholder itself —
+        so vLLM skips applying our ``PromptReplacement`` and merely *searches*
+        the returned prompt for the transcript token ids. They are not there, and
+        it raises ``Expected there to be 1 audio prompt placeholders ... found 0``.
+
+        Unlike a real HF processor (e.g. Ultravox's), we tokenize the prompt with
+        the ``<|audio|>`` marker untouched and hand the transcript back out of
+        band, so the replacement must be applied by vLLM.
+
+        Only the uncached path consults this hook; the cached path already
+        hardcodes False, which is why audio works with the default
+        ``mm_processor_cache_gb=4`` and breaks under ``--mm-processor-cache-gb 0``.
+        """
+        return False
 
     def _get_mm_fields_config(
         self,
